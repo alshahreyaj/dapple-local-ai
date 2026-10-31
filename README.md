@@ -2,6 +2,8 @@
 
 Dapple brings practical AI tools for photos and audio to your phone. Background Remover, Photo Enhancer, Object Remover, Speech Noise Remover, and Speech-to-Text are available now; choose a tool to download it, then work with your files on your phone. Your photos and recordings aren't uploaded for processing. More tools are in development.
 
+Get Dapple on [Google Play](https://play.google.com/store/apps/details?id=com.xenevastudio.dapple&hl=en).
+
 ## Build
 
 - Android Studio with JDK 17 and Android SDK 36
