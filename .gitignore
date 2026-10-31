@@ -1,0 +1,25 @@
+# Gradle and Android Studio generated files
+.gradle/
+**/build/
+.idea/
+*.iml
+local.properties
+
+# Local build outputs
+app/debug/
+app/release/
+captures/
+externalNativeBuild/
+.cxx/
+
+# Signing material and local secrets
+*.jks
+*.keystore
+*.p12
+*.pem
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
