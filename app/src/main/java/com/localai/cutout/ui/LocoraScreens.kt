@@ -432,7 +432,7 @@ fun DetailsScreen(feature: AiFeature, state: AppState, onBack: () -> Unit, onDow
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     SmallTag(feature.category.label)
-                    SmallTag(if (feature.status == ImplementationStatus.READY) "Ready on your phone" else "Coming soon")
+                    SmallTag(if (feature.status == ImplementationStatus.READY) "Available to download" else "Coming soon")
                 }
                 Text(feature.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 Text(feature.description, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -449,7 +449,7 @@ fun DetailsScreen(feature: AiFeature, state: AppState, onBack: () -> Unit, onDow
                     OutlinedButton(onClick = cancelAction, modifier = Modifier.fillMaxWidth()) { Text("Cancel download") }
                 }
                 else -> Button(onClick = if (ready && !feature.updateAvailable) onOpen else downloadAction, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(15.dp)) {
-                    Text(when { feature.updateAvailable -> "Update tool"; ready -> "Open tool"; else -> "Download tool · ${feature.modelSize}" }, fontWeight = FontWeight.SemiBold)
+                    Text(when { feature.updateAvailable -> "Update tool"; ready -> "Open tool"; else -> "Download · ${feature.modelSize}" }, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -458,16 +458,16 @@ fun DetailsScreen(feature: AiFeature, state: AppState, onBack: () -> Unit, onDow
             if (featureStatus != null && !downloading) item {
                 Text(featureStatus, color = if (featureStatus.startsWith("Saved")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
-            item { SectionTitle("TOOL INFORMATION", "Before you download") }
+            item { SectionTitle("TOOL DETAILS", "What to know") }
             item {
                 Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                     Column(Modifier.padding(horizontal = 16.dp)) {
-                        InfoRow("Space needed", feature.modelSize ?: "Not specified")
-                        InfoRow("Version", feature.modelVersion ?: "Not specified")
-                        InfoRow("Works on", feature.runtime ?: "Your phone")
-                        InfoRow("Usage terms", feature.license ?: "Not specified")
-                        InfoRow("Works with", feature.supportedFormats.joinToString().ifBlank { "Not specified" })
-                        InfoRow("Phone compatibility", feature.requirements ?: "No special setup", last = true)
+                        InfoRow("Download size", feature.modelSize ?: "Not specified")
+                        InfoRow(if (feature.id == "speech-to-text") "Model" else "Model version", feature.modelVersion ?: "Not specified")
+                        InfoRow("Runs on", feature.runtime ?: "Your phone")
+                        InfoRow("License", feature.license ?: "Not specified")
+                        InfoRow("Supported files", feature.supportedFormats.joinToString().ifBlank { "Not specified" })
+                        InfoRow("Phone requirements", feature.requirements ?: "No special setup", last = true)
                     }
                 }
             }
@@ -997,7 +997,7 @@ fun LocoraSettingsScreen(state: AppState, onTheme: (String) -> Unit, onDelete: (
             }
         }
         item { SectionTitle("ABOUT", "Dapple") }
-        item { Text("Version 1.0 · Creative AI, made personal", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Text("Version 1.1 · Creative AI, made personal", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item { TextButton(onClick = onLicenses) { Text("Model licenses and notices") } }
     }
     if (confirmDelete) AlertDialog(
