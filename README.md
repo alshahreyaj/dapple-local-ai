@@ -5,9 +5,13 @@ Dapple brings practical AI tools for photos and audio to your phone. Background 
 ## Build
 
 - Android Studio with JDK 17 and Android SDK 36
-- Gradle 9.5.0 via the included wrapper (AGP 8.13.2 requires at least Gradle 8.13; Gradle 9.6 is not compatible with AGP 8.x)
+- Gradle 9.5.0 via the included wrapper (AGP 8.13.2's documented minimum is Gradle 8.13)
 
 Open this directory in Android Studio and run the `app` configuration, or build with `./gradlew :app:assembleDebug`. The model is downloaded on first use and is not bundled in the APK.
+
+## Play Store release
+
+The current project configuration uses application ID `com.xenevastudio.dapple`, version name `1.1` (`versionCode` 2), and target API 36. Before preparing another release, check the latest version code in Play Console and increase this project's `versionCode` beyond it. Keep the application ID and the app's existing Play signing setup unchanged. See the [Play Store release checklist](docs/play-publishing-checklist.md).
 
 ## Model and reference implementation
 
