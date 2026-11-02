@@ -56,7 +56,7 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:$camerax")
     implementation("androidx.camera:camera-view:$camerax")
     // Match sherpa-onnx 1.13.8's bundled ONNX Runtime so both APIs share one ABI-compatible library.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.2")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.0")
     // Official OpenCV AAR. 4.5.3's native library was linked for 4 KB pages.
     implementation("org.opencv:opencv:4.12.0")
     // Overrides the older Fragment version pulled in through LiteRT's Play AI Delivery dependency.
