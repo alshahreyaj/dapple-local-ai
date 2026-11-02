@@ -47,6 +47,8 @@ import com.localai.cutout.ui.UpscalerToolScreen
 import com.localai.cutout.ui.SpeechNoiseRemoverScreen
 import com.localai.cutout.ui.ObjectRemoverScreen
 import com.localai.cutout.ui.SpeechToTextScreen
+import com.localai.cutout.ui.PhotoRestorationScreen
+import com.localai.cutout.ui.DocumentScannerScreen
 
 private enum class Destination(val title: String) { EXPLORE("Explore"), DOWNLOADS("Downloads"), SETTINGS("Settings") }
 
@@ -76,6 +78,8 @@ private fun LocoraApp(vm: AppViewModel = viewModel()) {
         uri?.let {
             when (selectedFeature?.id) {
                 "object-remover" -> vm.chooseObjectPhoto(it)
+                "photo-restoration" -> vm.chooseRestorationPhoto(it)
+                "document-scanner-ocr" -> vm.addDocumentPage(it)
                 "image-upscaler" -> vm.chooseUpscalerPhoto(it)
                 FeatureCatalog.backgroundRemover.id -> vm.chooseBackgroundPhoto(it)
                 else -> vm.choose(it)
@@ -85,6 +89,8 @@ private fun LocoraApp(vm: AppViewModel = viewModel()) {
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { if (selectedFeature?.id == "speech-to-text") vm.chooseTranscriptionAudio(it) else vm.chooseSpeechAudio(it) } }
     val wavSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/wav")) { uri -> uri?.let(vm::saveEnhancedAudio) }
     val transcriptSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri -> uri?.let(vm::saveTranscript) }
+    val documentTextSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri -> uri?.let(vm::saveDocumentText) }
+    val documentPdfSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri -> uri?.let(vm::saveDocumentPdf) }
     val recordPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) vm.startTranscriptionRecording() else vm.setTranscriptionError("Microphone access is needed to record audio. You can still choose an audio file.")
     }
@@ -94,6 +100,7 @@ private fun LocoraApp(vm: AppViewModel = viewModel()) {
             showLicenseNotices -> showLicenseNotices = false
             toolOpen -> {
                 if (selectedFeature?.id == "noise-remover" || selectedFeature?.id == "speech-to-text") vm.stopAudio()
+                if (selectedFeature?.id == "photo-restoration") vm.cancelRestoration()
                 if (selectedFeature?.id == "speech-to-text") {
                     vm.cancelTranscription()
                     if (state.transcriptionRecording) vm.stopTranscriptionRecording()
@@ -193,6 +200,43 @@ private fun LocoraApp(vm: AppViewModel = viewModel()) {
                     onPreparePhoto = vm::prepareObjectPhoto,
                     modifier = Modifier.padding(padding),
                 )
+                toolOpen && selectedFeature?.id == "photo-restoration" -> PhotoRestorationScreen(
+                    state = state,
+                    onBack = { vm.cancelRestoration(); vm.cancelRestorationDownload(); toolOpen = false; selectedFeature = null },
+                    onChoosePhoto = { picker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                    onRestore = vm::restorePhoto,
+                    onCancel = vm::cancelRestoration,
+                    onDownload = vm::downloadRestorationModels,
+                    onCancelDownload = vm::cancelRestorationDownload,
+                    onSaved = { vm.reportError("Restored photo saved to Pictures/Dapple") },
+                    onError = vm::reportError,
+                    modifier = Modifier.padding(padding),
+                )
+                toolOpen && selectedFeature?.id == "document-scanner-ocr" -> DocumentScannerScreen(
+                    state = state,
+                    onBack = { toolOpen = false; selectedFeature = null },
+                    onPickImage = { picker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                    onCameraImage = vm::addDocumentPage,
+                    onDownload = vm::downloadDocumentOcr,
+                    onCancelDownload = vm::cancelDocumentOcrDownload,
+                    onCorners = vm::setDocumentCorners,
+                    onSelectPage = vm::selectDocumentPage,
+                    onCrop = vm::cropDocumentPage,
+                    onRotate = vm::rotateDocumentPage,
+                    onFilter = vm::setDocumentFilter,
+                    onRecognize = vm::recognizeDocumentPage,
+                    onText = vm::setDocumentText,
+                    onMove = vm::moveDocumentPage,
+                    onDelete = vm::deleteDocumentPage,
+                    onStartOver = vm::startNewDocumentScan,
+                    onSaveText = { documentTextSaver.launch("dapple-scan.txt") },
+                    onSavePdf = { documentPdfSaver.launch("dapple-scan.pdf") },
+                    onShare = {
+                        val text = state.documentPages.mapIndexed { i, page -> "Page ${i + 1}\n${page.text}" }.joinToString("\n\n")
+                        context.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, text), "Share recognized text"))
+                    },
+                    modifier = Modifier.padding(padding),
+                )
                 toolOpen || (selectedFeature?.id == FeatureCatalog.backgroundRemover.id && state.installed) -> ToolScreen(
                     state = state,
                     onBack = { toolOpen = false; selectedFeature = null },
@@ -223,6 +267,10 @@ private fun LocoraApp(vm: AppViewModel = viewModel()) {
                     onCancelObject = vm::cancelObjectDownload,
                     onTranscriptionDownload = vm::downloadTranscriptionModel,
                     onCancelTranscription = vm::cancelTranscriptionDownload,
+                    onRestorationDownload = vm::downloadRestorationModels,
+                    onCancelRestoration = vm::cancelRestorationDownload,
+                    onDocumentOcrDownload = vm::downloadDocumentOcr,
+                    onCancelDocumentOcr = vm::cancelDocumentOcrDownload,
                 )
                 destination == Destination.EXPLORE -> ExploreScreen(
                     state = state,
@@ -233,6 +281,8 @@ private fun LocoraApp(vm: AppViewModel = viewModel()) {
                         else if (it.id == "noise-remover" && state.speechInstalled) { selectedFeature = it; toolOpen = true }
                         else if (it.id == "speech-to-text" && state.transcriptionInstalled) { selectedFeature = it; toolOpen = true }
                         else if (it.id == "object-remover" && state.objectInstalled) { selectedFeature = it; toolOpen = true }
+                        else if (it.id == "photo-restoration" && state.restorationScratchInstalled && state.restorationLamaInstalled && state.restorationColorizerInstalled && state.restorationEnhancerInstalled) { selectedFeature = it; toolOpen = true }
+                        else if (it.id == "document-scanner-ocr" && state.documentOcrInstalled) { selectedFeature = it; toolOpen = true }
                         else selectedFeature = it
                     },
                     onDownload = vm::download,
@@ -246,6 +296,10 @@ private fun LocoraApp(vm: AppViewModel = viewModel()) {
                     onCancelObject = vm::cancelObjectDownload,
                     onTranscriptionDownload = vm::downloadTranscriptionModel,
                     onCancelTranscription = vm::cancelTranscriptionDownload,
+                    onRestorationDownload = vm::downloadRestorationModels,
+                    onCancelRestoration = vm::cancelRestorationDownload,
+                    onDocumentOcrDownload = vm::downloadDocumentOcr,
+                    onCancelDocumentOcr = vm::cancelDocumentOcrDownload,
                     modifier = androidx.compose.ui.Modifier.padding(padding),
                 )
                 destination == Destination.DOWNLOADS -> DownloadsScreen(
@@ -271,6 +325,14 @@ private fun LocoraApp(vm: AppViewModel = viewModel()) {
                     onDownloadTranscription = vm::downloadTranscriptionModel,
                     onCancelTranscription = vm::cancelTranscriptionDownload,
                     onDeleteTranscription = vm::deleteTranscriptionModel,
+                    onOpenRestoration = { selectedFeature = FeatureCatalog.all.first { it.id == "photo-restoration" }; toolOpen = true },
+                    onDownloadRestoration = vm::downloadRestorationModels,
+                    onCancelRestoration = vm::cancelRestorationDownload,
+                    onDeleteRestoration = vm::deleteRestorationModels,
+                    onOpenDocumentOcr = { selectedFeature = FeatureCatalog.all.first { it.id == "document-scanner-ocr" }; toolOpen = true },
+                    onDownloadDocumentOcr = vm::downloadDocumentOcr,
+                    onCancelDocumentOcr = vm::cancelDocumentOcrDownload,
+                    onDeleteDocumentOcr = vm::deleteDocumentOcrModel,
                 )
                 else -> LocoraSettingsScreen(
                     state = state,
@@ -283,6 +345,8 @@ private fun LocoraApp(vm: AppViewModel = viewModel()) {
                     onDeleteSpeech = vm::deleteSpeechModel,
                     onDeleteObject = vm::deleteObjectModel,
                     onDeleteTranscription = vm::deleteTranscriptionModel,
+                    onDeleteRestoration = vm::deleteRestorationModels,
+                    onDeleteDocumentOcr = vm::deleteDocumentOcrModel,
                 )
             }
         }

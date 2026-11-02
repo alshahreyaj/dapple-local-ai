@@ -10,7 +10,9 @@ object ModelVerifier {
             val buffer = ByteArray(128 * 1024)
             while (true) { val count = stream.read(buffer); if (count < 0) break; digest.update(buffer, 0, count) }
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+        // Convert Byte to an unsigned 0..255 value before formatting. Formatting a
+        // signed Byte directly can sign-extend it and produce more than two hex digits.
+        return digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
     fun isValid(file: File): Boolean = file.isFile && file.length() == ModelManager.EXPECTED_BYTES && sha256(file) == ModelManager.SHA256
 }

@@ -5,6 +5,9 @@
 *.iml
 local.properties
 
+# Downloaded on-device model files (kept out of source control and APKs)
+/models/
+
 # Local build outputs
 app/debug/
 app/release/

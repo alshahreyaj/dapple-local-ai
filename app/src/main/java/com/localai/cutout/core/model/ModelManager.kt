@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
+import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 import java.io.FileInputStream
@@ -56,11 +57,29 @@ class ModelManager(context: Context, private val spec: ModelSpec = ModelSpecs.ba
                 }
                 output.fd.sync()
             } }
-            if (spec.verifySize && partial.length() != spec.downloadSizeBytes) throw IllegalStateException("The download was interrupted. Check your connection and try again.")
-            if (spec.downloadSha256.isNotBlank() && ModelVerifier.sha256(partial) != spec.downloadSha256) throw IllegalStateException("This download couldn't be verified. Please try again.")
+            if (spec.verifySize && partial.length() != spec.downloadSizeBytes) {
+                Log.e(TAG, "Model size mismatch for ${spec.id}: expected=${spec.downloadSizeBytes}, actual=${partial.length()}")
+                throw IllegalStateException("The download was incomplete. Check your connection and try again.")
+            }
+            if (spec.downloadSha256.isNotBlank()) {
+                val actualHash = ModelVerifier.sha256(partial)
+                if (!actualHash.equals(spec.downloadSha256, ignoreCase = true)) {
+                    Log.e(TAG, "Model SHA-256 mismatch for ${spec.id}: expected=${spec.downloadSha256}, actual=$actualHash, bytes=${partial.length()}")
+                    throw IllegalStateException("The downloaded model didn't match the expected file. Please retry.")
+                }
+            }
             val verifiedModel = if (spec.archiveEntry == null) partial else extractModel(partial)
-            if (spec.verifySize && verifiedModel.length() != spec.sizeBytes) throw IllegalStateException("This download couldn't be verified. Please try again.")
-            if (spec.sha256.isNotBlank() && ModelVerifier.sha256(verifiedModel) != spec.sha256) throw IllegalStateException("This download couldn't be verified. Please try again.")
+            if (spec.verifySize && verifiedModel.length() != spec.sizeBytes) {
+                Log.e(TAG, "Installed model size mismatch for ${spec.id}: expected=${spec.sizeBytes}, actual=${verifiedModel.length()}")
+                throw IllegalStateException("The downloaded model didn't match the expected file. Please retry.")
+            }
+            if (spec.sha256.isNotBlank()) {
+                val actualHash = ModelVerifier.sha256(verifiedModel)
+                if (!actualHash.equals(spec.sha256, ignoreCase = true)) {
+                    Log.e(TAG, "Installed model SHA-256 mismatch for ${spec.id}: expected=${spec.sha256}, actual=$actualHash, bytes=${verifiedModel.length()}")
+                    throw IllegalStateException("The downloaded model didn't match the expected file. Please retry.")
+                }
+            }
             model.delete()
             if (!verifiedModel.renameTo(model)) throw IllegalStateException("Couldn't prepare this tool. Please try again.")
         } catch (e: Throwable) { partial.delete(); stagedModel.delete(); throw e }
@@ -167,6 +186,7 @@ class ModelManager(context: Context, private val spec: ModelSpec = ModelSpecs.ba
     fun artifactPath(fileName: String) = File(model, fileName).absolutePath
     fun spec() = spec
     companion object {
+        private const val TAG = "DappleModelManager"
         const val MODEL_FILE = "ormbg.tflite"
         const val EXPECTED_BYTES = 176_240_148L
         const val SHA256 = "f6e359cf35c55e7bf216eb3141f6d76828667a5e8e67a929f53e9f7f38fae030"

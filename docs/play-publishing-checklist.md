@@ -2,7 +2,7 @@
 
 ## Project work completed
 
-- The app targets API 36. This project currently has `versionCode` 3 and `versionName` 1.1; before each release, check Play Console and set a higher version code.
+- The app targets API 36. This project currently has `versionCode` 4 and `versionName` 1.1; before each release, check Play Console and set a higher version code.
 - The configured application ID is `com.xenevastudio.dapple`; keep it identical to the published Play Store app.
 - A privacy policy is available in the app's Settings and its source copy is in [`privacy-policy.md`](privacy-policy.md).
 - Model source and license links are available under Settings → Model licenses.

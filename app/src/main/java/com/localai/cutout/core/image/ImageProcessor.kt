@@ -23,6 +23,9 @@ object ImageProcessor {
         return fitToPixelLimit(bitmap, upscalerPixelLimit())
     }
 
+    // Restoration holds masks and several tile-blending buffers, then creates a 4× output.
+    fun fitForPhotoRestoration(bitmap: Bitmap): Bitmap = fitToPixelLimit(bitmap, upscalerPixelLimit())
+
     private fun fitToPixelLimit(bitmap: Bitmap, maxPixels: Long): Bitmap {
         val pixels = bitmap.width.toLong() * bitmap.height
         if (pixels <= maxPixels) return bitmap
@@ -41,6 +44,8 @@ object ImageProcessor {
     fun decodeForBackgroundRemoval(context: Context, uri: Uri): Bitmap = decodeBounded(context, uri, objectRemovalPixelLimit())
 
     fun decodeForUpscaling(context: Context, uri: Uri): Bitmap = decodeBounded(context, uri, upscalerPixelLimit())
+
+    fun decodeForPhotoRestoration(context: Context, uri: Uri): Bitmap = decodeBounded(context, uri, upscalerPixelLimit())
 
     private fun decodeBounded(context: Context, uri: Uri, maxPixels: Long): Bitmap {
         val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -81,20 +86,8 @@ object ImageProcessor {
     }
 
     fun decode(context: Context, uri: Uri): Bitmap {
-        val bitmap = context.contentResolver.openInputStream(uri).use { BitmapFactoryCompat.decode(it ?: error("Cannot open image")) }
-        val orientation = runCatching { context.contentResolver.openInputStream(uri).use { ExifInterface(it!!).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) } }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
-        val matrix = Matrix().apply {
-            when (orientation) {
-                ExifInterface.ORIENTATION_ROTATE_90 -> postRotate(90f)
-                ExifInterface.ORIENTATION_ROTATE_180 -> postRotate(180f)
-                ExifInterface.ORIENTATION_ROTATE_270 -> postRotate(270f)
-                ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> postScale(-1f, 1f)
-                ExifInterface.ORIENTATION_FLIP_VERTICAL -> postScale(1f, -1f)
-                ExifInterface.ORIENTATION_TRANSPOSE -> { postScale(-1f, 1f); postRotate(90f) }
-                ExifInterface.ORIENTATION_TRANSVERSE -> { postScale(-1f, 1f); postRotate(270f) }
-            }
-        }
-        return if (orientation == ExifInterface.ORIENTATION_NORMAL || orientation == ExifInterface.ORIENTATION_UNDEFINED) bitmap else Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true).also { if (it !== bitmap) bitmap.recycle() }
+        // Use bounds-first decoding and inSampleSize instead of allocating the full source image.
+        return decodeBounded(context, uri, objectRemovalPixelLimit())
     }
 
     private fun orient(bitmap: Bitmap, orientation: Int): Bitmap {
@@ -112,15 +105,5 @@ object ImageProcessor {
             }
         }
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true).also { if (it !== bitmap) bitmap.recycle() }
-    }
-}
-
-private object BitmapFactoryCompat {
-    fun decode(input: java.io.InputStream): Bitmap {
-        val decoded = android.graphics.BitmapFactory.decodeStream(input) ?: error("Unsupported image")
-        if (decoded.config == Bitmap.Config.ARGB_8888 && !decoded.isRecycled) return decoded
-        val converted = decoded.copy(Bitmap.Config.ARGB_8888, false) ?: error("Could not decode image pixels")
-        decoded.recycle()
-        return converted
     }
 }

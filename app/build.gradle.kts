@@ -12,13 +12,14 @@ android {
         applicationId = "com.xenevastudio.dapple"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.1"
+        versionCode = 5
+        versionName = "1.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
         }
     }
@@ -30,6 +31,8 @@ android {
     buildFeatures { compose = true }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        jniLibs.pickFirsts += "**/libc++_shared.so"
+        jniLibs.pickFirsts += "**/libonnxruntime.so"
         jniLibs.useLegacyPackaging = true
     }
 }
@@ -47,8 +50,22 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.work:work-runtime-ktx:2.12.0")
     implementation("androidx.exifinterface:exifinterface:1.4.1")
+    val camerax = "1.6.2"
+    implementation("androidx.camera:camera-core:$camerax")
+    implementation("androidx.camera:camera-camera2:$camerax")
+    implementation("androidx.camera:camera-lifecycle:$camerax")
+    implementation("androidx.camera:camera-view:$camerax")
+    // Match sherpa-onnx 1.13.8's bundled ONNX Runtime so both APIs share one ABI-compatible library.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.2")
+    // Official OpenCV AAR. 4.5.3's native library was linked for 4 KB pages.
+    implementation("org.opencv:opencv:4.12.0")
+    // Overrides the older Fragment version pulled in through LiteRT's Play AI Delivery dependency.
+    implementation("androidx.fragment:fragment:1.9.1")
     implementation("com.google.ai.edge.litert:litert:2.3.0")
     implementation("com.google.ai.edge.litert:litert-gpu:2.3.0")
+    // ExecuTorch 1.4.1 is published as a direct XNNPACK AAR, not as a Maven
+    // coordinate. Use the published Maven Central 1.4.0 runtime for these 1.4 PTEs.
+    implementation("org.pytorch:executorch-android:1.4.0")
     implementation("com.qualcomm.qti:qnn-runtime:2.50.0")
     implementation("com.qualcomm.qti:qnn-litert-delegate:2.50.0")
     implementation("org.tensorflow:tensorflow-lite:2.17.0")

@@ -110,7 +110,7 @@ fun SpeechToTextScreen(
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("TRANSCRIPTION LANGUAGE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.1.sp)
+                Text("LANGUAGE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.1.sp)
                 Box {
                     OutlinedButton(
                         onClick = { languageMenuExpanded = true },
@@ -132,7 +132,7 @@ fun SpeechToTextScreen(
                         }
                     }
                 }
-                Text("Options follow Whisper's supported language list. Recognition accuracy varies by language and recording quality.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Choose the language spoken in the recording, or leave Auto-detect selected. Results vary with language and recording quality.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         item {

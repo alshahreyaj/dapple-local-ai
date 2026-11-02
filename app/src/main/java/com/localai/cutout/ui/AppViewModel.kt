@@ -14,16 +14,23 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.localai.cutout.core.inference.BgRemover
 import com.localai.cutout.core.image.ImageProcessor
+import com.localai.cutout.core.image.ImageExporter
 import com.localai.cutout.core.model.ModelDownloadWorker
 import com.localai.cutout.core.model.ModelManager
 import com.localai.cutout.core.model.ModelSpecs
+import com.localai.cutout.core.model.PhotoRestorationModelStore
 import com.localai.cutout.core.inference.RealEsrganUpscaler
 import com.localai.cutout.core.inference.DpdfnetSpeechDenoiser
 import com.localai.cutout.core.inference.LamaObjectRemover
+import com.localai.cutout.core.inference.PhotoRestorationPipeline
 import com.localai.cutout.core.inference.WhisperSpeechToText
 import com.localai.cutout.core.inference.WhisperLanguages
 import com.localai.cutout.core.inference.TranscriptTimeMark
 import com.localai.cutout.core.audio.WavAudio
+import com.localai.cutout.core.document.DocumentOcrEngine
+import com.localai.cutout.core.document.DocumentImageProcessor
+import com.localai.cutout.core.document.NormalizedQuad
+import com.localai.cutout.core.document.OcrLine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +38,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.pdf.PdfDocument
+import android.provider.MediaStore
+import android.content.ContentValues
+import android.os.Build
+import android.graphics.Color
 
 data class AppState(
     val installed: Boolean = false,
@@ -94,15 +108,50 @@ data class AppState(
     val transcriptLanguage: String? = null,
     val transcriptMarks: List<TranscriptTimeMark> = emptyList(),
     val transcriptionRecording: Boolean = false,
+    val restorationScratchInstalled: Boolean = false,
+    val restorationLamaInstalled: Boolean = false,
+    val restorationColorizerInstalled: Boolean = false,
+    val restorationEnhancerInstalled: Boolean = false,
+    val restorationDownloading: Boolean = false,
+    val restorationProgress: Int = 0,
+    val restorationBytes: Long = 0L,
+    val restorationError: String? = null,
+    val restorationProcessing: Boolean = false,
+    val restorationStage: String? = null,
+    val restorationTileProgress: Int = 0,
+    val restorationTileTotal: Int = 0,
+    val restorationSource: Bitmap? = null,
+    val restorationMaskPreview: Bitmap? = null,
+    val restorationResult: Bitmap? = null,
+    val restorationPhotoDownscaled: Boolean = false,
+    val documentOcrInstalled: Boolean = false,
+    val documentOcrDownloading: Boolean = false,
+    val documentOcrProgress: Int = 0,
+    val documentOcrBytes: Long = 0L,
+    val documentOcrError: String? = null,
+    val documentOcrBusy: Boolean = false,
+    val documentPages: List<DocumentPage> = emptyList(),
+    val documentSelectedPage: Int = 0,
+)
+
+data class DocumentPage(
+    val image: Bitmap,
+    val originalImage: Bitmap = image,
+    val corners: NormalizedQuad = NormalizedQuad.full(),
+    val filter: String = "Original",
+    val text: String = "",
+    val lines: List<OcrLine> = emptyList(),
 )
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
-    private enum class PhotoTarget { GENERAL, BACKGROUND, UPSCALER, OBJECT }
+    private enum class PhotoTarget { GENERAL, BACKGROUND, UPSCALER, OBJECT, RESTORATION }
     private val manager = ModelManager(app)
     private val upscalerManager = ModelManager(app, ModelSpecs.imageUpscaler)
     private val speechManager = ModelManager(app, ModelSpecs.speechNoiseRemover)
     private val objectManager = ModelManager(app, ModelSpecs.objectRemover)
     private val transcriptionManager = ModelManager(app, ModelSpecs.speechToText)
+    private val documentOcrManager = ModelManager(app, ModelSpecs.documentOcr)
+    private val restorationStore = PhotoRestorationModelStore(app)
     private val work = WorkManager.getInstance(app)
     private val preferences = app.getSharedPreferences("locora_settings", Application.MODE_PRIVATE)
     private var remover: BgRemover? = null
@@ -111,6 +160,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var objectRemover: LamaObjectRemover? = null
     private var transcriptionEngine: WhisperSpeechToText? = null
     private var transcriptionEngineLanguage: String? = null
+    private var documentOcrEngine: DocumentOcrEngine? = null
+    private var documentDownloadJob: kotlinx.coroutines.Job? = null
+    private var restorationPipeline: PhotoRestorationPipeline? = null
+    private var restorationDownloadJob: kotlinx.coroutines.Job? = null
     private var transcriptionJob: kotlinx.coroutines.Job? = null
     private var mediaRecorder: MediaRecorder? = null
     private var recordingFile: java.io.File? = null
@@ -125,7 +178,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     init {
         // Remove retired model files so the renamed Photo Enhancer model is downloaded fresh.
         listOf(
-            "realesr_general_x4v3.tflite", "realesr_general_x4v3.tflite.part", "realesr_general_x4v3.tflite.download.part",
             "real_esrgan_x4plus.tflite", "real_esrgan_x4plus.tflite.download.part", "real_esrgan_x4plus.tflite.installing",
             "mossformergan.onnx", "mossformergan.onnx.download.part", "mossformergan.onnx.installing",
         )
@@ -137,7 +189,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val speechReady = speechManager.installed()
             val objectReady = objectManager.installed()
             val transcriptionReady = transcriptionManager.installed()
-            _state.update { it.copy(installed = ready, modelBytes = bytes, upscalerInstalled = upscaleReady, upscalerBytes = if (upscaleReady) upscalerManager.sizeBytes() else 0L, speechInstalled = speechReady, speechBytes = if (speechReady) speechManager.sizeBytes() else 0L, objectInstalled = objectReady, objectBytes = if (objectReady) objectManager.sizeBytes() else 0L, transcriptionInstalled = transcriptionReady, transcriptionBytes = if (transcriptionReady) transcriptionManager.sizeBytes() else 0L) }
+            val scratchReady = restorationStore.scratchInstalled()
+            val lamaReady = restorationStore.lamaInstalled()
+            val colorizerReady = restorationStore.colorizerInstalled()
+            val restorationEnhancerReady = restorationStore.enhancerInstalled()
+            val documentReady = documentOcrManager.installed()
+            _state.update { it.copy(installed = ready, modelBytes = bytes, upscalerInstalled = upscaleReady, upscalerBytes = if (upscaleReady) upscalerManager.sizeBytes() else 0L, speechInstalled = speechReady, speechBytes = if (speechReady) speechManager.sizeBytes() else 0L, objectInstalled = objectReady, objectBytes = if (objectReady) objectManager.sizeBytes() else 0L, transcriptionInstalled = transcriptionReady, transcriptionBytes = if (transcriptionReady) transcriptionManager.sizeBytes() else 0L, restorationScratchInstalled = scratchReady, restorationLamaInstalled = lamaReady, restorationColorizerInstalled = colorizerReady, restorationEnhancerInstalled = restorationEnhancerReady, restorationBytes = restorationStore.scratchBytes() + restorationStore.lamaBytes() + restorationStore.colorizerBytes() + restorationStore.enhancerBytes(), documentOcrInstalled = documentReady, documentOcrBytes = if (documentReady) documentOcrManager.sizeBytes() else 0L) }
         }
     }
 
@@ -145,10 +202,170 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun chooseBackgroundPhoto(uri: Uri) = loadPhoto(uri, PhotoTarget.BACKGROUND)
     fun chooseUpscalerPhoto(uri: Uri) = loadPhoto(uri, PhotoTarget.UPSCALER)
     fun chooseObjectPhoto(uri: Uri) = loadPhoto(uri, PhotoTarget.OBJECT)
+    fun chooseRestorationPhoto(uri: Uri) = loadPhoto(uri, PhotoTarget.RESTORATION)
+
+    fun downloadDocumentOcr() {
+        if (_state.value.documentOcrDownloading || _state.value.documentOcrInstalled) return
+        val spec = ModelSpecs.documentOcr
+        val request = OneTimeWorkRequestBuilder<ModelDownloadWorker>().setInputData(androidx.work.workDataOf(ModelDownloadWorker.KEY_MODEL_ID to spec.id)).build()
+        work.enqueueUniqueWork("model:${spec.id}", ExistingWorkPolicy.REPLACE, request)
+        _state.update { it.copy(documentOcrDownloading = true, documentOcrProgress = 0, documentOcrError = null) }
+        documentDownloadJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                while (true) {
+                    val info = work.getWorkInfoById(request.id).get() ?: break
+                    val done = info.progress.getLong(ModelDownloadWorker.KEY_DONE, 0)
+                    val total = info.progress.getLong(ModelDownloadWorker.KEY_TOTAL, spec.downloadSizeBytes)
+                    when (info.state) {
+                        WorkInfo.State.SUCCEEDED -> _state.update { it.copy(documentOcrInstalled = true, documentOcrBytes = documentOcrManager.sizeBytes(), documentOcrDownloading = false, documentOcrProgress = 100) }
+                        WorkInfo.State.FAILED -> _state.update { it.copy(documentOcrDownloading = false, documentOcrError = info.outputData.getString(ModelDownloadWorker.KEY_ERROR) ?: "Couldn't download the scanner. Please retry.") }
+                        WorkInfo.State.CANCELLED -> _state.update { it.copy(documentOcrDownloading = false) }
+                        else -> _state.update { it.copy(documentOcrProgress = ((done * 100 / total.coerceAtLeast(1)).toInt()).coerceIn(0, 99)) }
+                    }
+                    if (info.state.isFinished) break
+                    delay(350)
+                }
+            } catch (e: Exception) { _state.update { it.copy(documentOcrDownloading = false, documentOcrError = e.message ?: "Couldn't check download status") } }
+        }
+    }
+
+    fun cancelDocumentOcrDownload() { work.cancelUniqueWork("model:${ModelSpecs.documentOcr.id}"); documentDownloadJob?.cancel(); _state.update { it.copy(documentOcrDownloading = false) } }
+
+    fun deleteDocumentOcrModel() {
+        val engine = documentOcrEngine; documentOcrEngine = null
+        _state.update { it.copy(documentOcrInstalled = false, documentOcrBytes = 0L, documentOcrError = null, status = "Document Scanner model removed") }
+        viewModelScope.launch(Dispatchers.IO) { runCatching { engine?.close() }; documentOcrManager.delete() }
+    }
+
+    fun addDocumentPage(uri: Uri) {
+        if (_state.value.documentOcrBusy) return
+        _state.update { it.copy(documentOcrBusy = true, documentOcrError = null) }
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) {
+                val image = ImageProcessor.decodeForObjectRemoval(getApplication(), uri)
+                val quad = DocumentImageProcessor.detectCorners(image)
+                DocumentPage(image = image, originalImage = image, corners = quad)
+            } }.onSuccess { page -> _state.update { it.copy(documentPages = it.documentPages + page, documentSelectedPage = it.documentPages.size, documentOcrBusy = false, documentOcrError = null) } }
+                .onFailure { _state.update { it.copy(documentOcrBusy = false, documentOcrError = "Couldn't open that image. Choose a JPG, PNG or WebP photo.") } }
+            if (uri.scheme == "file") runCatching { uri.path?.let { java.io.File(it).delete() } }
+        }
+    }
+
+    fun selectDocumentPage(index: Int) { if (index in _state.value.documentPages.indices) _state.update { it.copy(documentSelectedPage = index) } }
+    fun setDocumentCorners(corners: NormalizedQuad) { updateSelectedDocumentPage { it.copy(corners = corners) } }
+    fun setDocumentText(text: String) { updateSelectedDocumentPage { it.copy(text = text) } }
+    fun setDocumentFilter(filter: String) {
+        val state = _state.value; val page = state.documentPages.getOrNull(state.documentSelectedPage) ?: return
+        viewModelScope.launch(Dispatchers.Default) {
+            runCatching { DocumentImageProcessor.filter(page.originalImage, filter) }.onSuccess { filtered ->
+                // image is the current page bitmap; keep filter state without discarding OCR text.
+                val next = page.copy(image = filtered, filter = filter)
+                _state.update { latest -> if (latest.documentSelectedPage == state.documentSelectedPage) latest.copy(documentPages = latest.documentPages.toMutableList().also { it[state.documentSelectedPage] = next }) else latest }
+            }.onFailure { _state.update { it.copy(documentOcrError = "Couldn't apply that page filter.") } }
+        }
+    }
+    fun cropDocumentPage() {
+        val state = _state.value; val page = state.documentPages.getOrNull(state.documentSelectedPage) ?: return
+        _state.update { it.copy(documentOcrBusy = true, documentOcrError = null) }
+        viewModelScope.launch(Dispatchers.Default) { runCatching {
+            val cropped = DocumentImageProcessor.warp(page.originalImage, page.corners)
+            cropped to DocumentImageProcessor.filter(cropped, page.filter)
+        }.onSuccess { (original, filtered) -> updateDocumentPage(state.documentSelectedPage) { it.copy(image = filtered, originalImage = original, corners = NormalizedQuad.full(), lines = emptyList(), text = "") }; _state.update { it.copy(documentOcrBusy = false) } }.onFailure { _state.update { it.copy(documentOcrBusy = false, documentOcrError = "Couldn't correct the page. Adjust the corners and retry.") } } }
+    }
+    fun rotateDocumentPage() {
+        val index = _state.value.documentSelectedPage; val page = _state.value.documentPages.getOrNull(index) ?: return
+        val matrix = android.graphics.Matrix().apply { postRotate(90f) }
+        val rotatedOriginal = Bitmap.createBitmap(page.originalImage, 0, 0, page.originalImage.width, page.originalImage.height, matrix, true)
+        val rotated = DocumentImageProcessor.filter(rotatedOriginal, page.filter)
+        updateDocumentPage(index) { it.copy(image = rotated, originalImage = rotatedOriginal, corners = NormalizedQuad.full(), text = "", lines = emptyList()) }
+    }
+    fun moveDocumentPage(index: Int, delta: Int) {
+        val pages = _state.value.documentPages.toMutableList(); val to = index + delta
+        if (index !in pages.indices || to !in pages.indices) return
+        val page = pages.removeAt(index); pages.add(to, page)
+        _state.update { it.copy(documentPages = pages, documentSelectedPage = to) }
+    }
+    fun deleteDocumentPage(index: Int) {
+        val pages = _state.value.documentPages.toMutableList(); if (index !in pages.indices) return
+        pages.removeAt(index); _state.update { it.copy(documentPages = pages, documentSelectedPage = (index - 1).coerceAtLeast(0)) }
+    }
+
+    fun startNewDocumentScan() {
+        if (_state.value.documentOcrBusy) return
+        val oldPages = _state.value.documentPages
+        _state.update { it.copy(documentPages = emptyList(), documentSelectedPage = 0, documentOcrError = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            delay(100)
+            oldPages.flatMap { listOf(it.image, it.originalImage) }.distinct().forEach { bitmap ->
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
+        }
+    }
+    fun recognizeDocumentPage() {
+        val state = _state.value; val page = state.documentPages.getOrNull(state.documentSelectedPage) ?: return
+        if (!state.documentOcrInstalled || state.documentOcrBusy) return
+        _state.update { it.copy(documentOcrBusy = true, documentOcrError = null) }
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) {
+                val engine = documentOcrEngine ?: DocumentOcrEngine(getApplication(), java.io.File(documentOcrManager.path())).also { documentOcrEngine = it }
+                engine.scan(page.image)
+            } }.onSuccess { result -> updateDocumentPage(state.documentSelectedPage) { it.copy(text = result.text, lines = result.lines) }; _state.update { it.copy(documentOcrBusy = false) } }
+                .onFailure { error ->
+                    val message = if (error is OutOfMemoryError || error.message.orEmpty().contains("memory", true)) {
+                        "This page is too large for this phone to read. Try a smaller image."
+                    } else "Couldn't read text from this page. Try a clearer, well-lit photo."
+                    _state.update { it.copy(documentOcrBusy = false, documentOcrError = message) }
+                }
+        }
+    }
+    private fun updateSelectedDocumentPage(transform: (DocumentPage) -> DocumentPage) { val index = _state.value.documentSelectedPage; updateDocumentPage(index, transform) }
+    private fun updateDocumentPage(index: Int, transform: (DocumentPage) -> DocumentPage) { _state.update { state -> if (index !in state.documentPages.indices) state else state.copy(documentPages = state.documentPages.toMutableList().also { it[index] = transform(it[index]) }) } }
+
+    fun saveDocumentText(uri: Uri) {
+        val text = _state.value.documentPages.mapIndexed { i, page -> if (_state.value.documentPages.size > 1) "Page ${i + 1}\n${page.text}" else page.text }.joinToString("\n\n")
+        viewModelScope.launch(Dispatchers.IO) { runCatching { getApplication<Application>().contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(text) } ?: error("Couldn't create the text file") }.onFailure { _state.update { s -> s.copy(documentOcrError = "Couldn't save the text file.") } } }
+    }
+
+    fun saveDocumentPdf(uri: Uri) {
+        val pages = _state.value.documentPages
+        if (pages.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val resolver = getApplication<Application>().contentResolver
+                resolver.openOutputStream(uri)?.use { stream ->
+                    val pdf = PdfDocument()
+                    pages.forEachIndexed { index, page ->
+                        val info = PdfDocument.PageInfo.Builder(page.image.width.coerceAtMost(14400), page.image.height.coerceAtMost(14400), index + 1).create()
+                        val pdfPage = pdf.startPage(info)
+                        val canvas = pdfPage.canvas
+                        canvas.drawBitmap(page.image, null, android.graphics.Rect(0, 0, info.pageWidth, info.pageHeight), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                        // Tiny transparent searchable text layer positioned over the scanned words.
+                        val scaleX = info.pageWidth.toFloat() / page.image.width; val scaleY = info.pageHeight.toFloat() / page.image.height
+                        val editedLines = page.text.lines()
+                        page.lines.forEachIndexed { lineIndex, line ->
+                            val value = editedLines.getOrNull(lineIndex).orEmpty()
+                            if (value.isNotBlank()) {
+                                val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; alpha = 1; textSize = (line.bounds.height * scaleY).coerceAtLeast(1f); textScaleX = 1f }
+                                canvas.drawText(value, line.bounds.left * scaleX, (line.bounds.bottom * scaleY).toFloat(), p)
+                            }
+                        }
+                        // Keep newly added edited lines searchable when they have no original OCR box.
+                        if (editedLines.size > page.lines.size && page.text.isNotBlank()) {
+                            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; alpha = 1; textSize = 1f }
+                            editedLines.drop(page.lines.size).forEachIndexed { row, line -> canvas.drawText(line, 1f, (row + 1).toFloat(), p) }
+                        }
+                        pdf.finishPage(pdfPage)
+                    }
+                    pdf.writeTo(stream); pdf.close()
+                } ?: error("Couldn't create the PDF")
+            }.onFailure { _state.update { s -> s.copy(documentOcrError = "Couldn't save the PDF. Please try again.") } }
+        }
+    }
 
     fun prepareObjectPhoto() = prepareBoundedPhoto(PhotoTarget.OBJECT, ImageProcessor::fitForObjectRemoval)
     fun prepareBackgroundPhoto() = prepareBoundedPhoto(PhotoTarget.BACKGROUND, ImageProcessor::fitForBackgroundRemoval)
     fun prepareUpscalerPhoto() = prepareBoundedPhoto(PhotoTarget.UPSCALER, ImageProcessor::fitForUpscaling)
+    fun prepareRestorationPhoto() = prepareBoundedPhoto(PhotoTarget.RESTORATION, ImageProcessor::fitForPhotoRestoration)
 
     private fun prepareBoundedPhoto(target: PhotoTarget, fit: (Bitmap) -> Bitmap) {
         val currentState = _state.value
@@ -156,6 +373,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             PhotoTarget.BACKGROUND -> currentState.backgroundSource
             PhotoTarget.UPSCALER -> currentState.upscalerSource
             PhotoTarget.OBJECT -> currentState.objectSource
+            PhotoTarget.RESTORATION -> currentState.restorationSource
             PhotoTarget.GENERAL -> return
         }
         if (targetPhoto != null || currentState.busy) return
@@ -176,6 +394,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     PhotoTarget.BACKGROUND -> state.copy(busy = false, status = message)
                     PhotoTarget.UPSCALER -> state.copy(busy = false, status = null, upscalerError = message)
                     PhotoTarget.OBJECT -> state.copy(busy = false, status = null, objectError = message)
+                    PhotoTarget.RESTORATION -> state.copy(busy = false, status = null, restorationError = message)
                     PhotoTarget.GENERAL -> state
                 } }
             } else {
@@ -186,6 +405,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         PhotoTarget.BACKGROUND -> if (state.backgroundSource == null) state.copy(backgroundSource = fitted, backgroundPhotoDownscaled = downscaled, busy = false, status = null) else state
                         PhotoTarget.UPSCALER -> if (state.upscalerSource == null) state.copy(upscalerSource = fitted, upscalerPhotoDownscaled = downscaled, busy = false, status = null) else state
                         PhotoTarget.OBJECT -> if (state.objectSource == null) state.copy(objectSource = fitted, objectPhotoDownscaled = downscaled, busy = false, status = null) else state
+                        PhotoTarget.RESTORATION -> if (state.restorationSource == null) state.copy(restorationSource = fitted, restorationPhotoDownscaled = downscaled, busy = false, status = null) else state
                         PhotoTarget.GENERAL -> state
                     }
                 }
@@ -193,6 +413,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     PhotoTarget.BACKGROUND -> _state.value.backgroundSource === fitted
                     PhotoTarget.UPSCALER -> _state.value.upscalerSource === fitted
                     PhotoTarget.OBJECT -> _state.value.objectSource === fitted
+                    PhotoTarget.RESTORATION -> _state.value.restorationSource === fitted
                     PhotoTarget.GENERAL -> false
                 }
                 if (!wasAdopted && !fitted.isRecycled) fitted.recycle()
@@ -208,18 +429,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 PhotoTarget.BACKGROUND -> currentState.backgroundSource
                 PhotoTarget.UPSCALER -> currentState.upscalerSource
                 PhotoTarget.OBJECT -> currentState.objectSource
+                PhotoTarget.RESTORATION -> currentState.restorationSource
             }
             val oldResults = when (target) {
                 PhotoTarget.GENERAL -> listOfNotNull(currentState.result, currentState.upscaleResult, currentState.objectResult).distinct()
                 PhotoTarget.BACKGROUND -> listOfNotNull(currentState.result)
                 PhotoTarget.UPSCALER -> listOfNotNull(currentState.upscaleResult)
                 PhotoTarget.OBJECT -> listOfNotNull(currentState.objectResult)
+                PhotoTarget.RESTORATION -> listOfNotNull(currentState.restorationResult, currentState.restorationMaskPreview).distinct()
             }
             _state.value = when (target) {
                 PhotoTarget.GENERAL -> currentState.copy(busy = true, status = null, result = null, upscaleResult = null, objectResult = null, objectError = null)
                 PhotoTarget.BACKGROUND -> currentState.copy(busy = true, status = null, result = null)
                 PhotoTarget.UPSCALER -> currentState.copy(busy = true, status = null, upscaleResult = null, upscalerError = null)
                 PhotoTarget.OBJECT -> currentState.copy(busy = true, objectResult = null, objectError = null)
+                PhotoTarget.RESTORATION -> currentState.copy(busy = true, restorationResult = null, restorationMaskPreview = null, restorationError = null)
             }
             oldResults.forEach { if (!it.isRecycled) it.recycle() }
             try {
@@ -230,6 +454,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         PhotoTarget.BACKGROUND -> ImageProcessor.decodeForBackgroundRemoval(app, uri)
                         PhotoTarget.UPSCALER -> ImageProcessor.decodeForUpscaling(app, uri)
                         PhotoTarget.OBJECT -> ImageProcessor.decodeForObjectRemoval(app, uri)
+                        PhotoTarget.RESTORATION -> ImageProcessor.decodeForPhotoRestoration(app, uri)
                     }
                     decoded to (target != PhotoTarget.GENERAL && wasResized(decoded, uri))
                 }
@@ -239,12 +464,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     PhotoTarget.BACKGROUND -> latest.copy(backgroundSource = bitmap, backgroundPhotoDownscaled = downscaled, busy = false)
                     PhotoTarget.UPSCALER -> latest.copy(upscalerSource = bitmap, upscalerPhotoDownscaled = downscaled, busy = false)
                     PhotoTarget.OBJECT -> latest.copy(objectSource = bitmap, objectPhotoDownscaled = downscaled, busy = false)
+                    PhotoTarget.RESTORATION -> latest.copy(restorationSource = bitmap, restorationPhotoDownscaled = downscaled, busy = false)
                 }
                 oldPhoto?.let { if (it !== bitmap && !it.isRecycled) it.recycle() }
             } catch (_: Throwable) {
                 val message = "Couldn't open that photo. Choose a JPG, PNG or WebP image."
                 _state.value = when (target) {
                     PhotoTarget.OBJECT -> _state.value.copy(busy = false, objectError = message)
+                    PhotoTarget.RESTORATION -> _state.value.copy(busy = false, restorationError = message)
                     PhotoTarget.UPSCALER -> _state.value.copy(busy = false, upscalerError = message)
                     else -> _state.value.copy(busy = false, status = message)
                 }
@@ -312,6 +539,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     fun downloadUpscaler() {
+        if (_state.value.restorationDownloading) return
         if (_state.value.upscalerDownloading || _state.value.upscalerInstalled) return
         val request = OneTimeWorkRequestBuilder<ModelDownloadWorker>().setInputData(androidx.work.workDataOf(ModelDownloadWorker.KEY_MODEL_ID to ModelSpecs.imageUpscaler.id)).build()
         work.enqueueUniqueWork("model:${ModelSpecs.imageUpscaler.id}", ExistingWorkPolicy.REPLACE, request)
@@ -494,9 +722,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Throwable) {
                 val message = e.message.orEmpty()
                 _state.value = _state.value.copy(transcriptionBusy = false, transcriptionStage = null, transcriptionError = when {
-                    message.contains("shorter than five minutes", true) -> "This recording is longer than five minutes. Choose a shorter recording."
+                    isAudioLengthLimit(message) -> "This recording is longer than this tool can handle. Try a shorter recording (under five minutes)."
                     message.contains("isn't supported", true) || message.contains("is not supported", true) -> message
                     message.contains("empty", true) -> "This recording is empty. Choose another file."
+                    isDeviceLimitation(e) -> "This phone couldn't process the recording. Try a shorter clip or close other apps, then try again."
                     else -> "Couldn't transcribe this recording. Try another file or a shorter clip."
                 })
             }
@@ -592,8 +821,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val message = e.message.orEmpty()
                 _state.value = _state.value.copy(objectProcessing = false, objectError = when {
                     message.contains("cancel", true) -> "Object removal cancelled."
-                    message.contains("large", true) || message.contains("memory", true) -> message
+                    message.contains("large", true) || message.contains("memory", true) -> "This photo is too large for Object Remover on this phone. Try a smaller photo or close other apps, then try again."
                     message.contains("paint", true) -> message
+                    isDeviceLimitation(e) -> "This phone couldn't run Object Remover with the available memory or graphics support. Try a smaller photo or close other apps, then try again."
                     else -> "Couldn't remove that object on this phone. Try a smaller photo or a different selection."
                 })
             } finally { if (!mask.isRecycled) mask.recycle() }
@@ -606,6 +836,150 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val result = _state.value.objectResult
         _state.value = _state.value.copy(objectResult = null, objectError = null, objectTileProgress = 0, objectTileTotal = 0)
         if (result != null && !result.isRecycled) result.recycle()
+    }
+
+    fun downloadRestorationModels() {
+        if (_state.value.restorationDownloading) return
+        if (_state.value.restorationScratchInstalled && _state.value.restorationLamaInstalled && _state.value.restorationColorizerInstalled && _state.value.restorationEnhancerInstalled) return
+        restorationDownloadJob?.cancel()
+        _state.value = _state.value.copy(restorationDownloading = true, restorationProgress = 0, restorationError = null)
+        restorationDownloadJob = viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val scratchSize = ModelSpecs.restorationScratch.downloadSizeBytes
+                    val lamaSize = ModelSpecs.restorationLama.downloadSizeBytes
+                    val colorizerSize = ModelSpecs.restorationColorizer.downloadSizeBytes
+                    val enhancerSize = ModelSpecs.restorationEnhancer.downloadSizeBytes
+                    val needScratch = !restorationStore.scratchInstalled()
+                    val needLama = !restorationStore.lamaInstalled()
+                    val needColorizer = !restorationStore.colorizerInstalled()
+                    val needEnhancer = !restorationStore.enhancerInstalled()
+                    val totalSize = (if (needScratch) scratchSize else 0L) + (if (needLama) lamaSize else 0L) + (if (needColorizer) colorizerSize else 0L) + (if (needEnhancer) enhancerSize else 0L)
+                    var base = 0L
+                    if (needScratch) {
+                        restorationStore.downloadScratch { done, _ ->
+                            val progress = ((base + done) * 100 / totalSize).toInt().coerceIn(0, 99)
+                            _state.value = _state.value.copy(restorationProgress = progress)
+                        }
+                        base += scratchSize
+                    }
+                    if (needLama) {
+                        restorationStore.downloadLama { done, _ ->
+                            val progress = ((base + done) * 100 / totalSize).toInt().coerceIn(0, 99)
+                            _state.value = _state.value.copy(restorationProgress = progress)
+                        }
+                        base += lamaSize
+                    }
+                    if (needColorizer) {
+                        restorationStore.downloadColorizer { done, _ ->
+                            val progress = ((base + done) * 100 / totalSize).toInt().coerceIn(0, 99)
+                            _state.value = _state.value.copy(restorationProgress = progress)
+                        }
+                        base += colorizerSize
+                    }
+                    if (needEnhancer) {
+                        restorationStore.downloadEnhancer { done, _ ->
+                            val progress = ((base + done) * 100 / totalSize).toInt().coerceIn(0, 99)
+                            _state.value = _state.value.copy(restorationProgress = progress)
+                        }
+                        base += enhancerSize
+                    }
+                }
+                _state.value = _state.value.copy(
+                    restorationDownloading = false,
+                    restorationProgress = 100,
+                    restorationScratchInstalled = true,
+                    restorationLamaInstalled = true,
+                    restorationColorizerInstalled = true,
+                    restorationEnhancerInstalled = true,
+                    restorationBytes = restorationStore.scratchBytes() + restorationStore.lamaBytes() + restorationStore.colorizerBytes() + restorationStore.enhancerBytes(),
+                )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                _state.value = _state.value.copy(restorationDownloading = false, restorationEnhancerInstalled = restorationStore.enhancerInstalled(), restorationBytes = restorationStore.scratchBytes() + restorationStore.lamaBytes() + restorationStore.colorizerBytes() + restorationStore.enhancerBytes())
+                throw e
+            } catch (e: Throwable) {
+                _state.value = _state.value.copy(restorationDownloading = false, restorationEnhancerInstalled = restorationStore.enhancerInstalled(), restorationBytes = restorationStore.scratchBytes() + restorationStore.lamaBytes() + restorationStore.colorizerBytes() + restorationStore.enhancerBytes(), restorationError = e.message ?: "Couldn't download the restoration models. Please retry.")
+            }
+        }
+    }
+
+    fun cancelRestorationDownload() {
+        restorationDownloadJob?.cancel()
+        restorationDownloadJob = null
+        _state.value = _state.value.copy(restorationDownloading = false)
+    }
+
+    fun restorePhoto() {
+        val source = _state.value.restorationSource ?: return
+        if (_state.value.restorationProcessing) return
+        if (!_state.value.restorationScratchInstalled || !_state.value.restorationLamaInstalled || !_state.value.restorationColorizerInstalled || !_state.value.restorationEnhancerInstalled) {
+            downloadRestorationModels()
+            return
+        }
+        viewModelScope.launch {
+            _state.value.restorationResult?.let { if (!it.isRecycled) it.recycle() }
+            _state.value.restorationMaskPreview?.let { if (!it.isRecycled) it.recycle() }
+            _state.value = _state.value.copy(restorationProcessing = true, restorationError = null, restorationStage = "Preparing photo", restorationTileProgress = 0, restorationTileTotal = 0)
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val engine = restorationPipeline ?: PhotoRestorationPipeline(
+                        restorationStore.scratchPath(), restorationStore.lamaPath(),
+                        restorationStore.colorizerPath(), restorationStore.enhancerPath(),
+                    ).also { restorationPipeline = it }
+                    engine.restore(source) { stage, done, total ->
+                        _state.value = _state.value.copy(restorationStage = stage, restorationTileProgress = done, restorationTileTotal = total)
+                    }
+                }
+                _state.value = _state.value.copy(
+                    restorationProcessing = false,
+                    restorationStage = null,
+                    restorationMaskPreview = result.maskPreview,
+                    restorationResult = result.restored,
+                    restorationTileProgress = result.tilesProcessed,
+                    restorationTileTotal = result.tilesProcessed,
+                )
+            } catch (e: Throwable) {
+                val message = e.message.orEmpty()
+                _state.value = _state.value.copy(
+                    restorationProcessing = false,
+                    restorationStage = null,
+                    restorationError = when {
+                        message.contains("cancel", true) -> "Restoration cancelled."
+                        message.contains("large", true) || message.contains("memory", true) -> "This photo is too large to restore on this phone. Try a smaller photo or close other apps, then retry."
+                        isDeviceLimitation(e) -> "This phone couldn't run the restoration models with the available memory. Try a smaller photo or close other apps, then retry."
+                        else -> "Couldn't restore this photo. Try another image or a smaller photo."
+                    },
+                )
+            }
+        }
+    }
+
+    fun cancelRestoration() { restorationPipeline?.cancel() }
+
+    fun saveRestoredPhoto() {
+        val bitmap = _state.value.restorationResult ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                ImageExporter.save(getApplication(), bitmap, "dapple-restored-photo")
+                _state.value = _state.value.copy(restorationError = "Restored photo saved to Pictures/Dapple")
+            } catch (_: Throwable) {
+                _state.value = _state.value.copy(restorationError = "Couldn't save the restored photo. Please try again.")
+            }
+        }
+    }
+
+    fun deleteRestorationModels() {
+        cancelRestorationDownload()
+        val engine = restorationPipeline
+        restorationPipeline = null
+        _state.value = _state.value.copy(restorationScratchInstalled = false, restorationLamaInstalled = false, restorationColorizerInstalled = false, restorationEnhancerInstalled = false, restorationBytes = 0L, restorationError = null)
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { engine?.close() }
+            restorationStore.deleteScratch()
+            restorationStore.deleteLama()
+            restorationStore.deleteColorizer()
+            restorationStore.deleteEnhancer()
+        }
     }
 
     fun chooseSpeechAudio(uri: Uri) {
@@ -635,7 +1009,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Throwable) {
                 val message = e.message.orEmpty()
                 val friendlyMessage = when {
+                    isAudioLengthLimit(message) -> "This recording is longer than this tool can handle. Try a shorter recording (under five minutes)."
                     message.contains("isn't supported", ignoreCase = true) || message.contains("is not supported", ignoreCase = true) || message.contains("Try a WAV", ignoreCase = true) -> message
+                    isDeviceLimitation(e) -> "This phone couldn't clean this recording. Try a shorter clip or close other apps, then try again."
                     else -> "Couldn't clean up this recording. Try another audio file."
                 }
                 _state.value = _state.value.copy(speechBusy = false, speechError = friendlyMessage)
@@ -708,7 +1084,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Throwable) {
                 val message = e.message.orEmpty()
                 val friendlyMessage = when {
-                    message.contains("Not enough memory", ignoreCase = true) -> "This photo is too large to enhance on your phone. Choose a smaller photo."
+                    isDeviceLimitation(e) -> "This phone couldn't enhance this photo with the available memory or graphics support. Try a smaller photo or close other apps, then try again."
                     message.contains("cancel", ignoreCase = true) -> "Enhancement cancelled."
                     else -> "Couldn't enhance this photo. Please try again."
                 }
@@ -729,13 +1105,43 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 _state.value = _state.value.copy(result = result, busy = false, status = if (result == null) "Processing cancelled" else null)
             } catch (e: Throwable) {
-                _state.value = _state.value.copy(busy = false, status = "Background Remover couldn't start on this phone. Please try again.")
+                val message = e.message.orEmpty()
+                val friendlyMessage = if (isDeviceLimitation(e)) {
+                    "This phone couldn't run Background Remover with the available memory or graphics support. Try a smaller photo or close other apps, then try again."
+                } else {
+                    "Background Remover couldn't process this photo. Try another photo."
+                }
+                _state.value = _state.value.copy(busy = false, status = friendlyMessage)
             }
         }
     }
     fun cancelProcessing() { remover?.cancel(); upscaler?.cancel(); _state.value = _state.value.copy(busy = false, status = "Cancelling…") }
     fun setSaved(uri: Uri) { _state.value = _state.value.copy(savedUri = uri, status = "Saved to your photo library") }
     fun reportError(message: String) { _state.value = _state.value.copy(status = message) }
+
+    private fun isAudioLengthLimit(message: String): Boolean =
+        message.contains("five minutes", true) ||
+            message.contains("too long to process", true) ||
+            message.contains("audio file is too large", true)
+
+    /** Recognizes resource/runtime failures from on-device inference without recasting ordinary input errors. */
+    private fun isDeviceLimitation(error: Throwable): Boolean {
+        var cause: Throwable? = error
+        while (cause != null) {
+            val message = cause.message.orEmpty()
+            if (cause is OutOfMemoryError ||
+                message.contains("memory", true) || message.contains("out of memory", true) ||
+                message.contains("couldn't start on this phone", true) ||
+                message.contains("could not initialize", true) || message.contains("couldn't initialize", true) ||
+                message.contains("accelerator", true) || message.contains("delegate", true) ||
+                message.contains("GPU", true) || message.contains("NPU", true) ||
+                message.contains("unsupported operation", true) || message.contains("not supported on this device", true)
+            ) return true
+            cause = cause.cause
+        }
+        return false
+    }
+
     fun showSettings(show: Boolean) { _state.value = _state.value.copy(settings = show) }
     fun deleteModel() {
         val engine = remover
@@ -752,5 +1158,5 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         preferences.edit().putString("theme", value).apply()
         _state.value = _state.value.copy(themePreference = value)
     }
-    override fun onCleared() { remover?.cancel(); upscaler?.cancel(); speechDenoiser?.cancel(); objectRemover?.cancel(); cancelTranscription(); runCatching { mediaRecorder?.stop() }; runCatching { mediaRecorder?.release() }; mediaRecorder = null; stopAudio(); viewModelScope.launch(Dispatchers.IO) { runCatching { remover?.close() }; runCatching { upscaler?.close() }; runCatching { speechDenoiser?.close() }; runCatching { objectRemover?.close() }; runCatching { transcriptionEngine?.close() } }; super.onCleared() }
+    override fun onCleared() { remover?.cancel(); upscaler?.cancel(); speechDenoiser?.cancel(); objectRemover?.cancel(); restorationPipeline?.cancel(); restorationDownloadJob?.cancel(); documentDownloadJob?.cancel(); cancelTranscription(); runCatching { mediaRecorder?.stop() }; runCatching { mediaRecorder?.release() }; mediaRecorder = null; stopAudio(); viewModelScope.launch(Dispatchers.IO) { runCatching { remover?.close() }; runCatching { upscaler?.close() }; runCatching { speechDenoiser?.close() }; runCatching { objectRemover?.close() }; runCatching { restorationPipeline?.close() }; runCatching { transcriptionEngine?.close() }; runCatching { documentOcrEngine?.close() } }; super.onCleared() }
 }

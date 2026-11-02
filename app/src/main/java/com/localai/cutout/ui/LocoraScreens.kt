@@ -27,7 +27,6 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Share
-import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -35,8 +34,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -93,6 +90,10 @@ fun ExploreScreen(
     onCancelObject: () -> Unit = onCancel,
     onTranscriptionDownload: () -> Unit = onDownload,
     onCancelTranscription: () -> Unit = onCancel,
+    onRestorationDownload: () -> Unit = onDownload,
+    onCancelRestoration: () -> Unit = onCancel,
+    onDocumentOcrDownload: () -> Unit = onDownload,
+    onCancelDocumentOcr: () -> Unit = onCancel,
     modifier: Modifier = Modifier,
 ) {
     var search by remember { mutableStateOf("") }
@@ -118,10 +119,10 @@ fun ExploreScreen(
         item {
             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text("Create more. Keep it yours.", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp)
-                Text("Explore AI tools for photos and audio. Choose a tool to download it; your files are processed on your phone.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Explore tools for photos, audio, and documents. They run on your phone; download each tool when you need it. Tool order is a general guide, and results vary by phone.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        item { SearchBox(search, { search = it }, category, categories, { category = it }) }
+        item { SearchBox(search, { search = it }) }
         item {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 categories.forEach { item ->
@@ -143,17 +144,17 @@ fun ExploreScreen(
             val pair = filtered.chunked(2)[row]
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 pair.forEach { feature ->
-                    val installed = when (feature.id) { FeatureCatalog.backgroundRemover.id -> state.installed; "image-upscaler" -> state.upscalerInstalled; "noise-remover" -> state.speechInstalled; "speech-to-text" -> state.transcriptionInstalled; "object-remover" -> state.objectInstalled; else -> false }
-                    val downloading = when (feature.id) { FeatureCatalog.backgroundRemover.id -> state.downloading; "image-upscaler" -> state.upscalerDownloading; "noise-remover" -> state.speechDownloading; "speech-to-text" -> state.transcriptionDownloading; "object-remover" -> state.objectDownloading; else -> false }
-                    val progress = when (feature.id) { "image-upscaler" -> state.upscalerProgress; "noise-remover" -> state.speechProgress; "speech-to-text" -> state.transcriptionProgress; "object-remover" -> state.objectProgress; else -> state.downloadProgress }
+                    val installed = when (feature.id) { FeatureCatalog.backgroundRemover.id -> state.installed; "image-upscaler" -> state.upscalerInstalled; "noise-remover" -> state.speechInstalled; "speech-to-text" -> state.transcriptionInstalled; "object-remover" -> state.objectInstalled; "document-scanner-ocr" -> state.documentOcrInstalled; "photo-restoration" -> state.restorationScratchInstalled && state.restorationLamaInstalled && state.restorationColorizerInstalled && state.restorationEnhancerInstalled; else -> false }
+                    val downloading = when (feature.id) { FeatureCatalog.backgroundRemover.id -> state.downloading; "image-upscaler" -> state.upscalerDownloading; "noise-remover" -> state.speechDownloading; "speech-to-text" -> state.transcriptionDownloading; "object-remover" -> state.objectDownloading; "document-scanner-ocr" -> state.documentOcrDownloading; "photo-restoration" -> state.restorationDownloading; else -> false }
+                    val progress = when (feature.id) { "image-upscaler" -> state.upscalerProgress; "noise-remover" -> state.speechProgress; "speech-to-text" -> state.transcriptionProgress; "object-remover" -> state.objectProgress; "document-scanner-ocr" -> state.documentOcrProgress; "photo-restoration" -> state.restorationProgress; else -> state.downloadProgress }
                     FeatureCard(
                         feature = feature,
                         installed = installed,
                         downloading = downloading,
                         progress = progress,
                         onClick = { if (feature.status == ImplementationStatus.READY && installed) onOpen(feature) else onFeature(feature) },
-                        onAction = { if (feature.status == ImplementationStatus.READY) { if (installed) onOpen(feature) else when (feature.id) { "image-upscaler" -> onUpscalerDownload(); "noise-remover" -> onSpeechDownload(); "speech-to-text" -> onTranscriptionDownload(); "object-remover" -> onObjectDownload(); else -> onDownload() } } },
-                        onCancel = when (feature.id) { "image-upscaler" -> onCancelUpscaler; "noise-remover" -> onCancelSpeech; "speech-to-text" -> onCancelTranscription; "object-remover" -> onCancelObject; else -> onCancel },
+                        onAction = { if (feature.status == ImplementationStatus.READY) { if (installed) onOpen(feature) else when (feature.id) { "image-upscaler" -> onUpscalerDownload(); "noise-remover" -> onSpeechDownload(); "speech-to-text" -> onTranscriptionDownload(); "object-remover" -> onObjectDownload(); "document-scanner-ocr" -> onDocumentOcrDownload(); "photo-restoration" -> onRestorationDownload(); else -> onDownload() } } },
+                        onCancel = when (feature.id) { "image-upscaler" -> onCancelUpscaler; "noise-remover" -> onCancelSpeech; "speech-to-text" -> onCancelTranscription; "object-remover" -> onCancelObject; "document-scanner-ocr" -> onCancelDocumentOcr; "photo-restoration" -> onCancelRestoration; else -> onCancel },
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -162,16 +163,16 @@ fun ExploreScreen(
         }
         else items(filtered.size) { index ->
             val feature = filtered[index]
-            val installed = when (feature.id) { FeatureCatalog.backgroundRemover.id -> state.installed; "image-upscaler" -> state.upscalerInstalled; "noise-remover" -> state.speechInstalled; "speech-to-text" -> state.transcriptionInstalled; "object-remover" -> state.objectInstalled; else -> false }
-            val downloading = when (feature.id) { FeatureCatalog.backgroundRemover.id -> state.downloading; "image-upscaler" -> state.upscalerDownloading; "noise-remover" -> state.speechDownloading; "speech-to-text" -> state.transcriptionDownloading; "object-remover" -> state.objectDownloading; else -> false }
+            val installed = when (feature.id) { FeatureCatalog.backgroundRemover.id -> state.installed; "image-upscaler" -> state.upscalerInstalled; "noise-remover" -> state.speechInstalled; "speech-to-text" -> state.transcriptionInstalled; "object-remover" -> state.objectInstalled; "document-scanner-ocr" -> state.documentOcrInstalled; "photo-restoration" -> state.restorationScratchInstalled && state.restorationLamaInstalled && state.restorationColorizerInstalled && state.restorationEnhancerInstalled; else -> false }
+            val downloading = when (feature.id) { FeatureCatalog.backgroundRemover.id -> state.downloading; "image-upscaler" -> state.upscalerDownloading; "noise-remover" -> state.speechDownloading; "speech-to-text" -> state.transcriptionDownloading; "object-remover" -> state.objectDownloading; "document-scanner-ocr" -> state.documentOcrDownloading; "photo-restoration" -> state.restorationDownloading; else -> false }
             FeatureListItem(
                 feature = feature,
                 installed = installed,
                 downloading = downloading,
-                progress = when (feature.id) { "image-upscaler" -> state.upscalerProgress; "noise-remover" -> state.speechProgress; "speech-to-text" -> state.transcriptionProgress; "object-remover" -> state.objectProgress; else -> state.downloadProgress },
+                progress = when (feature.id) { "image-upscaler" -> state.upscalerProgress; "noise-remover" -> state.speechProgress; "speech-to-text" -> state.transcriptionProgress; "object-remover" -> state.objectProgress; "document-scanner-ocr" -> state.documentOcrProgress; "photo-restoration" -> state.restorationProgress; else -> state.downloadProgress },
                 onClick = { if (feature.status == ImplementationStatus.READY && installed) onOpen(feature) else onFeature(feature) },
-                onAction = { if (feature.status == ImplementationStatus.READY) { if (installed) onOpen(feature) else when (feature.id) { "image-upscaler" -> onUpscalerDownload(); "noise-remover" -> onSpeechDownload(); "speech-to-text" -> onTranscriptionDownload(); "object-remover" -> onObjectDownload(); else -> onDownload() } } },
-                onCancel = when (feature.id) { "image-upscaler" -> onCancelUpscaler; "noise-remover" -> onCancelSpeech; "speech-to-text" -> onCancelTranscription; "object-remover" -> onCancelObject; else -> onCancel },
+                onAction = { if (feature.status == ImplementationStatus.READY) { if (installed) onOpen(feature) else when (feature.id) { "image-upscaler" -> onUpscalerDownload(); "noise-remover" -> onSpeechDownload(); "speech-to-text" -> onTranscriptionDownload(); "object-remover" -> onObjectDownload(); "document-scanner-ocr" -> onDocumentOcrDownload(); "photo-restoration" -> onRestorationDownload(); else -> onDownload() } } },
+                onCancel = when (feature.id) { "image-upscaler" -> onCancelUpscaler; "noise-remover" -> onCancelSpeech; "speech-to-text" -> onCancelTranscription; "object-remover" -> onCancelObject; "document-scanner-ocr" -> onCancelDocumentOcr; "photo-restoration" -> onCancelRestoration; else -> onCancel },
             )
         }
         item { PrivacyNote() }
@@ -198,11 +199,7 @@ private fun LocoraWordmark() {
 private fun SearchBox(
     value: String,
     onValue: (String) -> Unit,
-    category: String,
-    categories: List<String>,
-    onCategorySelected: (String) -> Unit,
 ) {
-    var filterMenuExpanded by remember { mutableStateOf(false) }
     Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 15.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -210,22 +207,6 @@ private fun SearchBox(
                 if (value.isEmpty()) Text("Search AI tools", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                 inner()
             })
-            Box {
-                IconButton(onClick = { filterMenuExpanded = true }) {
-                    Icon(Icons.Rounded.Tune, contentDescription = "Filter by category", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                DropdownMenu(expanded = filterMenuExpanded, onDismissRequest = { filterMenuExpanded = false }) {
-                    categories.forEach { option ->
-                        DropdownMenuItem(
-                            text = { Text(if (category == option) "$option ✓" else option) },
-                            onClick = {
-                                onCategorySelected(option)
-                                filterMenuExpanded = false
-                            },
-                        )
-                    }
-                }
-            }
         }
     }
 }
@@ -414,12 +395,13 @@ private fun FeaturePreview(feature: AiFeature, modifier: Modifier = Modifier, co
 }
 
 @Composable
-fun DetailsScreen(feature: AiFeature, state: AppState, onBack: () -> Unit, onDownload: () -> Unit, onOpen: () -> Unit, onCancel: () -> Unit, onSaved: () -> Unit, onError: (String) -> Unit, modifier: Modifier = Modifier, onUpscalerDownload: () -> Unit = onDownload, onUpscalerCancel: () -> Unit = onCancel, onSpeechDownload: () -> Unit = onDownload, onCancelSpeech: () -> Unit = onCancel, onObjectDownload: () -> Unit = onDownload, onCancelObject: () -> Unit = onCancel, onTranscriptionDownload: () -> Unit = onDownload, onCancelTranscription: () -> Unit = onCancel) {
-    val ready = feature.status == ImplementationStatus.READY && when (feature.id) { "image-upscaler" -> state.upscalerInstalled; "noise-remover" -> state.speechInstalled; "speech-to-text" -> state.transcriptionInstalled; "object-remover" -> state.objectInstalled; else -> state.installed }
-    val downloading = when (feature.id) { "image-upscaler" -> state.upscalerDownloading; "noise-remover" -> state.speechDownloading; "speech-to-text" -> state.transcriptionDownloading; "object-remover" -> state.objectDownloading; else -> feature.id == FeatureCatalog.backgroundRemover.id && state.downloading }
-    val progress = when (feature.id) { "image-upscaler" -> state.upscalerProgress; "noise-remover" -> state.speechProgress; "speech-to-text" -> state.transcriptionProgress; "object-remover" -> state.objectProgress; else -> state.downloadProgress }
-    val downloadAction = when (feature.id) { "image-upscaler" -> onUpscalerDownload; "noise-remover" -> onSpeechDownload; "speech-to-text" -> onTranscriptionDownload; "object-remover" -> onObjectDownload; else -> onDownload }
-    val cancelAction = when (feature.id) { "image-upscaler" -> onUpscalerCancel; "noise-remover" -> onCancelSpeech; "speech-to-text" -> onCancelTranscription; "object-remover" -> onCancelObject; else -> onCancel }
+fun DetailsScreen(feature: AiFeature, state: AppState, onBack: () -> Unit, onDownload: () -> Unit, onOpen: () -> Unit, onCancel: () -> Unit, onSaved: () -> Unit, onError: (String) -> Unit, modifier: Modifier = Modifier, onUpscalerDownload: () -> Unit = onDownload, onUpscalerCancel: () -> Unit = onCancel, onSpeechDownload: () -> Unit = onDownload, onCancelSpeech: () -> Unit = onCancel, onObjectDownload: () -> Unit = onDownload, onCancelObject: () -> Unit = onCancel, onTranscriptionDownload: () -> Unit = onDownload, onCancelTranscription: () -> Unit = onCancel, onRestorationDownload: () -> Unit = onDownload, onCancelRestoration: () -> Unit = onCancel, onDocumentOcrDownload: () -> Unit = onDownload, onCancelDocumentOcr: () -> Unit = onCancel) {
+    var showTechnicalDetails by remember(feature.id) { mutableStateOf(false) }
+    val ready = feature.status == ImplementationStatus.READY && when (feature.id) { "image-upscaler" -> state.upscalerInstalled; "noise-remover" -> state.speechInstalled; "speech-to-text" -> state.transcriptionInstalled; "object-remover" -> state.objectInstalled; "document-scanner-ocr" -> state.documentOcrInstalled; "photo-restoration" -> state.restorationScratchInstalled && state.restorationLamaInstalled && state.restorationColorizerInstalled && state.restorationEnhancerInstalled; else -> state.installed }
+    val downloading = when (feature.id) { "image-upscaler" -> state.upscalerDownloading; "noise-remover" -> state.speechDownloading; "speech-to-text" -> state.transcriptionDownloading; "object-remover" -> state.objectDownloading; "document-scanner-ocr" -> state.documentOcrDownloading; "photo-restoration" -> state.restorationDownloading; else -> feature.id == FeatureCatalog.backgroundRemover.id && state.downloading }
+    val progress = when (feature.id) { "image-upscaler" -> state.upscalerProgress; "noise-remover" -> state.speechProgress; "speech-to-text" -> state.transcriptionProgress; "object-remover" -> state.objectProgress; "document-scanner-ocr" -> state.documentOcrProgress; "photo-restoration" -> state.restorationProgress; else -> state.downloadProgress }
+    val downloadAction = when (feature.id) { "image-upscaler" -> onUpscalerDownload; "noise-remover" -> onSpeechDownload; "speech-to-text" -> onTranscriptionDownload; "object-remover" -> onObjectDownload; "document-scanner-ocr" -> onDocumentOcrDownload; "photo-restoration" -> onRestorationDownload; else -> onDownload }
+    val cancelAction = when (feature.id) { "image-upscaler" -> onUpscalerCancel; "noise-remover" -> onCancelSpeech; "speech-to-text" -> onCancelTranscription; "object-remover" -> onCancelObject; "document-scanner-ocr" -> onCancelDocumentOcr; "photo-restoration" -> onCancelRestoration; else -> onCancel }
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -454,7 +436,7 @@ fun DetailsScreen(feature: AiFeature, state: AppState, onBack: () -> Unit, onDow
             }
         }
         if (feature.status == ImplementationStatus.READY) {
-            val featureStatus = when (feature.id) { "noise-remover" -> state.speechError; "speech-to-text" -> state.transcriptionError; "object-remover" -> state.objectError; else -> state.status }
+            val featureStatus = when (feature.id) { "noise-remover" -> state.speechError; "speech-to-text" -> state.transcriptionError; "object-remover" -> state.objectError; "document-scanner-ocr" -> state.documentOcrError; "photo-restoration" -> state.restorationError; else -> state.status }
             if (featureStatus != null && !downloading) item {
                 Text(featureStatus, color = if (featureStatus.startsWith("Saved")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
@@ -463,11 +445,18 @@ fun DetailsScreen(feature: AiFeature, state: AppState, onBack: () -> Unit, onDow
                 Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                     Column(Modifier.padding(horizontal = 16.dp)) {
                         InfoRow("Download size", feature.modelSize ?: "Not specified")
-                        InfoRow(if (feature.id == "speech-to-text") "Model" else "Model version", feature.modelVersion ?: "Not specified")
-                        InfoRow("Runs on", feature.runtime ?: "Your phone")
-                        InfoRow("License", feature.license ?: "Not specified")
                         InfoRow("Supported files", feature.supportedFormats.joinToString().ifBlank { "Not specified" })
                         InfoRow("Phone requirements", feature.requirements ?: "No special setup", last = true)
+                        TextButton(onClick = { showTechnicalDetails = !showTechnicalDetails }, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (showTechnicalDetails) "Hide technical details" else "Technical details")
+                        }
+                        AnimatedVisibility(visible = showTechnicalDetails) {
+                            Column {
+                                InfoRow(if (feature.id == "speech-to-text") "Model" else "Model version", feature.modelVersion ?: "Not specified")
+                                InfoRow("Runs on", feature.runtime ?: "Your phone")
+                                InfoRow("License", feature.license ?: "Not specified", last = true)
+                            }
+                        }
                     }
                 }
             }
@@ -760,7 +749,7 @@ private fun InfoRow(label: String, value: String, last: Boolean = false) {
 }
 
 @Composable
-fun DownloadsScreen(state: AppState, onOpen: () -> Unit, onDownload: () -> Unit, onCancel: () -> Unit, onDelete: () -> Unit, modifier: Modifier = Modifier, onOpenUpscaler: () -> Unit = onOpen, onDownloadUpscaler: () -> Unit = onDownload, onCancelUpscaler: () -> Unit = onCancel, onDeleteUpscaler: () -> Unit = onDelete, onOpenSpeech: () -> Unit = onOpen, onDownloadSpeech: () -> Unit = onDownload, onCancelSpeech: () -> Unit = onCancel, onDeleteSpeech: () -> Unit = onDelete, onOpenObject: () -> Unit = onOpen, onDownloadObject: () -> Unit = onDownload, onCancelObject: () -> Unit = onCancel, onDeleteObject: () -> Unit = onDelete, onOpenTranscription: () -> Unit = onOpen, onDownloadTranscription: () -> Unit = onDownload, onCancelTranscription: () -> Unit = onCancel, onDeleteTranscription: () -> Unit = onDelete) {
+fun DownloadsScreen(state: AppState, onOpen: () -> Unit, onDownload: () -> Unit, onCancel: () -> Unit, onDelete: () -> Unit, modifier: Modifier = Modifier, onOpenUpscaler: () -> Unit = onOpen, onDownloadUpscaler: () -> Unit = onDownload, onCancelUpscaler: () -> Unit = onCancel, onDeleteUpscaler: () -> Unit = onDelete, onOpenSpeech: () -> Unit = onOpen, onDownloadSpeech: () -> Unit = onDownload, onCancelSpeech: () -> Unit = onCancel, onDeleteSpeech: () -> Unit = onDelete, onOpenObject: () -> Unit = onOpen, onDownloadObject: () -> Unit = onDownload, onCancelObject: () -> Unit = onCancel, onDeleteObject: () -> Unit = onDelete, onOpenTranscription: () -> Unit = onOpen, onDownloadTranscription: () -> Unit = onDownload, onCancelTranscription: () -> Unit = onCancel, onDeleteTranscription: () -> Unit = onDelete, onOpenRestoration: () -> Unit = onOpen, onDownloadRestoration: () -> Unit = onDownload, onCancelRestoration: () -> Unit = onCancel, onDeleteRestoration: () -> Unit = onDelete, onOpenDocumentOcr: () -> Unit = onOpen, onDownloadDocumentOcr: () -> Unit = onDownload, onCancelDocumentOcr: () -> Unit = onCancel, onDeleteDocumentOcr: () -> Unit = onDelete) {
     var confirmDelete by remember { mutableStateOf(false) }
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item { LocoraWordmark() }
@@ -789,9 +778,16 @@ fun DownloadsScreen(state: AppState, onOpen: () -> Unit, onDownload: () -> Unit,
             SectionTitle(if (state.objectDownloading) "IN PROGRESS" else if (state.objectInstalled) "INSTALLED" else "AVAILABLE", if (state.objectDownloading) "Downloading" else if (state.objectInstalled) "Ready to use" else "Download didn't finish")
             ObjectModelCard(state, onOpenObject, onDownloadObject, onCancelObject, onDeleteObject)
         }
-        if (!state.installed && !state.downloading && !state.upscalerInstalled && !state.upscalerDownloading && !state.speechInstalled && !state.speechDownloading && !state.transcriptionInstalled && !state.transcriptionDownloading && !state.objectInstalled && !state.objectDownloading && state.objectError == null && state.transcriptionError == null) item {
+        if (state.documentOcrDownloading || state.documentOcrInstalled || state.documentOcrError != null) item {
+            SectionTitle(if (state.documentOcrDownloading) "IN PROGRESS" else if (state.documentOcrInstalled) "INSTALLED" else "AVAILABLE", if (state.documentOcrDownloading) "Downloading" else if (state.documentOcrInstalled) "Ready to use" else "Download didn't finish")
+            DocumentOcrModelCard(state, onOpenDocumentOcr, onDownloadDocumentOcr, onCancelDocumentOcr, onDeleteDocumentOcr)
+        }
+        if (state.restorationDownloading || state.restorationScratchInstalled || state.restorationLamaInstalled || state.restorationColorizerInstalled || state.restorationEnhancerInstalled || state.restorationError != null) item {
+            SectionTitle(if (state.restorationDownloading) "IN PROGRESS" else if (state.restorationScratchInstalled && state.restorationLamaInstalled && state.restorationColorizerInstalled && state.restorationEnhancerInstalled) "INSTALLED" else "AVAILABLE", if (state.restorationDownloading) "Downloading" else if (state.restorationScratchInstalled && state.restorationLamaInstalled && state.restorationColorizerInstalled && state.restorationEnhancerInstalled) "Ready to use" else "Download didn't finish")
+            RestorationModelCard(state, onOpenRestoration, onDownloadRestoration, onCancelRestoration, onDeleteRestoration)
+        }
+        if (!state.installed && !state.downloading && !state.upscalerInstalled && !state.upscalerDownloading && !state.speechInstalled && !state.speechDownloading && !state.transcriptionInstalled && !state.transcriptionDownloading && !state.objectInstalled && !state.objectDownloading && !state.documentOcrInstalled && !state.documentOcrDownloading && state.documentOcrError == null && state.objectError == null && state.transcriptionError == null && !state.restorationScratchInstalled && !state.restorationLamaInstalled && !state.restorationColorizerInstalled && !state.restorationEnhancerInstalled && !state.restorationDownloading && state.restorationError == null) item {
             EmptyState("Your tools are ready to add", "Choose a tool in Explore to download it. After setup, you can use it without internet.")
-            OutlinedButton(onClick = onDownload, modifier = Modifier.fillMaxWidth()) { Text(if (state.status != null) "Try download again" else "Get Background Remover") }
         }
         if (state.status != null && !state.downloading) item { Text(state.status, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
     }
@@ -802,6 +798,34 @@ fun DownloadsScreen(state: AppState, onOpen: () -> Unit, onDownload: () -> Unit,
         confirmButton = { TextButton(onClick = { confirmDelete = false; onDelete() }) { Text("Delete") } },
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Keep it") } },
     )
+}
+
+@Composable
+private fun RestorationModelCard(state: AppState, onOpen: () -> Unit, onDownload: () -> Unit, onCancel: () -> Unit, onDelete: () -> Unit) {
+    Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp)) {
+                FeaturePreview(FeatureCatalog.all.first { it.id == "photo-restoration" }, Modifier.size(72.dp).clip(RoundedCornerShape(16.dp)))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Photo Restoration", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("Scratch repair · colorization · 4× detail", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (state.restorationScratchInstalled && state.restorationLamaInstalled && state.restorationColorizerInstalled && state.restorationEnhancerInstalled) "${formatSize(state.restorationBytes)} Photo Restoration models" else "About 488 MB total", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+            if (state.restorationDownloading) {
+                LinearProgressIndicator({ state.restorationProgress / 100f }, Modifier.fillMaxWidth())
+                OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel download") }
+            } else if (state.restorationScratchInstalled && state.restorationLamaInstalled && state.restorationColorizerInstalled && state.restorationEnhancerInstalled) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = onOpen, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Text("Open tool") }
+                    OutlinedButton(onClick = onDelete, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(6.dp)); Text("Delete") }
+                }
+            } else {
+                state.restorationError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                Button(onClick = onDownload, modifier = Modifier.fillMaxWidth()) { Text("Download models") }
+            }
+        }
+    }
 }
 
 @Composable
@@ -892,6 +916,31 @@ private fun ObjectModelCard(state: AppState, onOpen: () -> Unit, onDownload: () 
 }
 
 @Composable
+private fun DocumentOcrModelCard(state: AppState, onOpen: () -> Unit, onDownload: () -> Unit, onCancel: () -> Unit, onDelete: () -> Unit) {
+    Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp)) {
+                FeaturePreview(FeatureCatalog.all.first { it.id == "document-scanner-ocr" }, Modifier.size(72.dp).clip(RoundedCornerShape(16.dp)))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Document Scanner & OCR", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("English and German · works offline", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (state.documentOcrInstalled) formatSize(state.documentOcrBytes) else if (state.documentOcrDownloading) "${state.documentOcrProgress}% downloaded" else "12.9 MB download", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                }
+                if (state.documentOcrInstalled) Icon(Icons.Rounded.CheckCircle, "Ready to use", tint = MaterialTheme.colorScheme.primary)
+            }
+            when {
+                state.documentOcrDownloading -> { LinearProgressIndicator(progress = { state.documentOcrProgress / 100f }, modifier = Modifier.fillMaxWidth()); OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel download") } }
+                state.documentOcrInstalled -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = onOpen, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Text("Open tool") }
+                    OutlinedButton(onClick = onDelete, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(6.dp)); Text("Delete") }
+                }
+                else -> { state.documentOcrError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }; Button(onClick = onDownload, modifier = Modifier.fillMaxWidth()) { Text("Try again") } }
+            }
+        }
+    }
+}
+
+@Composable
 private fun UpscalerModelCard(state: AppState, onOpen: () -> Unit, onDownload: () -> Unit, onCancel: () -> Unit, onDelete: () -> Unit) {
     Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -951,12 +1000,14 @@ private fun ModelCard(state: AppState, onOpen: () -> Unit, onDownload: () -> Uni
 }
 
 @Composable
-fun LocoraSettingsScreen(state: AppState, onTheme: (String) -> Unit, onDelete: () -> Unit, onPrivacyPolicy: () -> Unit, onLicenses: () -> Unit, modifier: Modifier = Modifier, onDeleteUpscaler: () -> Unit = onDelete, onDeleteSpeech: () -> Unit = onDelete, onDeleteObject: () -> Unit = onDelete, onDeleteTranscription: () -> Unit = onDelete) {
+fun LocoraSettingsScreen(state: AppState, onTheme: (String) -> Unit, onDelete: () -> Unit, onPrivacyPolicy: () -> Unit, onLicenses: () -> Unit, modifier: Modifier = Modifier, onDeleteUpscaler: () -> Unit = onDelete, onDeleteSpeech: () -> Unit = onDelete, onDeleteObject: () -> Unit = onDelete, onDeleteTranscription: () -> Unit = onDelete, onDeleteRestoration: () -> Unit = onDelete, onDeleteDocumentOcr: () -> Unit = onDelete) {
     var confirmDelete by remember { mutableStateOf(false) }
     var confirmDeleteUpscaler by remember { mutableStateOf(false) }
     var confirmDeleteSpeech by remember { mutableStateOf(false) }
     var confirmDeleteObject by remember { mutableStateOf(false) }
     var confirmDeleteTranscription by remember { mutableStateOf(false) }
+    var confirmDeleteRestoration by remember { mutableStateOf(false) }
+    var confirmDeleteDocumentOcr by remember { mutableStateOf(false) }
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item { LocoraWordmark() }
         item { Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold) }
@@ -972,8 +1023,9 @@ fun LocoraSettingsScreen(state: AppState, onTheme: (String) -> Unit, onDelete: (
             SectionTitle("STORAGE", "Downloads & storage")
             Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    val modelCount = (if (state.installed) 1 else 0) + (if (state.upscalerInstalled) 1 else 0) + (if (state.speechInstalled) 1 else 0) + (if (state.transcriptionInstalled) 1 else 0) + (if (state.objectInstalled) 1 else 0)
-                    val usedBytes = state.modelBytes + state.upscalerBytes + state.speechBytes + state.transcriptionBytes + state.objectBytes
+                    val restorationInstalled = state.restorationScratchInstalled || state.restorationLamaInstalled || state.restorationColorizerInstalled || state.restorationEnhancerInstalled
+                    val modelCount = (if (state.installed) 1 else 0) + (if (state.upscalerInstalled) 1 else 0) + (if (state.speechInstalled) 1 else 0) + (if (state.transcriptionInstalled) 1 else 0) + (if (state.objectInstalled) 1 else 0) + (if (state.documentOcrInstalled) 1 else 0) + (if (restorationInstalled) 1 else 0)
+                    val usedBytes = state.modelBytes + state.upscalerBytes + state.speechBytes + state.transcriptionBytes + state.objectBytes + state.documentOcrBytes + state.restorationBytes
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Tools downloaded"); Text(modelCount.toString(), fontWeight = FontWeight.SemiBold) }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Space used"); Text(formatSize(usedBytes), fontWeight = FontWeight.SemiBold) }
                     if (state.installed) TextButton(onClick = { confirmDelete = true }) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(5.dp)); Text("Remove Background Remover") }
@@ -981,6 +1033,8 @@ fun LocoraSettingsScreen(state: AppState, onTheme: (String) -> Unit, onDelete: (
                     if (state.speechInstalled) TextButton(onClick = { confirmDeleteSpeech = true }) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(5.dp)); Text("Remove Speech Noise Remover") }
                     if (state.transcriptionInstalled) TextButton(onClick = { confirmDeleteTranscription = true }) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(5.dp)); Text("Remove Speech-to-Text model") }
                     if (state.objectInstalled) TextButton(onClick = { confirmDeleteObject = true }) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(5.dp)); Text("Remove Object Remover") }
+                    if (state.documentOcrInstalled) TextButton(onClick = { confirmDeleteDocumentOcr = true }) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(5.dp)); Text("Remove Document Scanner model") }
+                    if (restorationInstalled) TextButton(onClick = { confirmDeleteRestoration = true }) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(5.dp)); Text("Remove Photo Restoration models") }
                 }
             }
         }
@@ -1031,6 +1085,18 @@ fun LocoraSettingsScreen(state: AppState, onTheme: (String) -> Unit, onDelete: (
         confirmButton = { TextButton(onClick = { confirmDeleteObject = false; onDeleteObject() }) { Text("Remove") } },
         dismissButton = { TextButton(onClick = { confirmDeleteObject = false }) { Text("Keep it") } },
     )
+    if (confirmDeleteRestoration) AlertDialog(
+        onDismissRequest = { confirmDeleteRestoration = false }, title = { Text("Remove Photo Restoration models?") },
+        text = { Text("This removes the scratch repair, colorization and detail enhancement models. You can download Photo Restoration again from Explore.") },
+        confirmButton = { TextButton(onClick = { confirmDeleteRestoration = false; onDeleteRestoration() }) { Text("Remove") } },
+        dismissButton = { TextButton(onClick = { confirmDeleteRestoration = false }) { Text("Keep models") } },
+    )
+    if (confirmDeleteDocumentOcr) AlertDialog(
+        onDismissRequest = { confirmDeleteDocumentOcr = false }, title = { Text("Remove Document Scanner model?") },
+        text = { Text("You can download it again from Explore. Your saved scans and text won't be deleted.") },
+        confirmButton = { TextButton(onClick = { confirmDeleteDocumentOcr = false; onDeleteDocumentOcr() }) { Text("Remove") } },
+        dismissButton = { TextButton(onClick = { confirmDeleteDocumentOcr = false }) { Text("Keep model") } },
+    )
 }
 
 @Composable
@@ -1073,6 +1139,9 @@ fun LicenseNoticesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
         item { LicenseLink("Speech-to-Text model", "MIT · OpenAI Whisper", "https://github.com/openai/whisper/blob/main/LICENSE", uriHandler::openUri) }
         item { LicenseLink("Speech-to-Text runtime", "Apache 2.0 · sherpa-onnx", "https://github.com/k2-fsa/sherpa-onnx/blob/master/LICENSE", uriHandler::openUri) }
         item { LicenseLink("Object Remover", "Apache 2.0 · LaMa-Dilated", "https://huggingface.co/qualcomm/LaMa-Dilated", uriHandler::openUri) }
+        item { LicenseLink("Document Scanner & OCR models", "Apache 2.0 · PaddleOCR PP-OCRv5", "https://github.com/PaddlePaddle/PaddleOCR/blob/main/LICENSE", uriHandler::openUri) }
+        item { LicenseLink("Document Scanner runtime", "MIT · ONNX Runtime", "https://github.com/microsoft/onnxruntime/blob/main/LICENSE", uriHandler::openUri) }
+        item { LicenseLink("Document image processing", "Apache 2.0 · OpenCV", "https://opencv.org/license/", uriHandler::openUri) }
         item { Text("The downloadable files are hosted separately from these upstream projects. Their publisher must have the right to distribute those files under the applicable terms.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
