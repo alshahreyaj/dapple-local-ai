@@ -132,7 +132,7 @@ fun SpeechToTextScreen(
                         }
                     }
                 }
-                Text("Choose the language spoken in the recording, or leave Auto-detect selected. Results vary with language and recording quality.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Choose from 15 common languages, or leave Auto-detect selected. Results vary with language and recording quality.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         item {
