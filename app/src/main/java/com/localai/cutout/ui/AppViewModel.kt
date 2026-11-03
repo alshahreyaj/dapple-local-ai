@@ -50,6 +50,7 @@ data class AppState(
     val installed: Boolean = false,
     val downloading: Boolean = false,
     val downloadProgress: Int = 0,
+    val backgroundDownloadError: String? = null,
     val status: String? = null,
     val busy: Boolean = false,
     val source: Bitmap? = null,
@@ -171,7 +172,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var processAfterDownload = false
     private val _state = MutableStateFlow(AppState(
         themePreference = preferences.getString("theme", "system") ?: "system",
-        transcriptionLanguageSelection = preferences.getString("transcription_language", "auto") ?: "auto",
+        transcriptionLanguageSelection = (preferences.getString("transcription_language", WhisperLanguages.AUTO) ?: WhisperLanguages.AUTO)
+            .takeIf { selected -> selected == WhisperLanguages.AUTO || WhisperLanguages.supported.any { it.code == selected } }
+            ?: WhisperLanguages.AUTO,
     ))
     val state = _state.asStateFlow()
 
@@ -508,7 +511,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (_state.value.downloading || _state.value.installed) return
         val request = OneTimeWorkRequestBuilder<ModelDownloadWorker>().build()
         work.enqueueUniqueWork("ormbg-model", ExistingWorkPolicy.REPLACE, request)
-        _state.value = _state.value.copy(downloading = true, status = null, downloadProgress = 0)
+        _state.value = _state.value.copy(downloading = true, status = null, backgroundDownloadError = null, downloadProgress = 0)
         viewModelScope.launch(Dispatchers.IO) {
           try {
             while (true) {
@@ -517,7 +520,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val total = info.progress.getLong(ModelDownloadWorker.KEY_TOTAL, ModelManager.EXPECTED_BYTES)
                 when (info.state) {
                     WorkInfo.State.SUCCEEDED -> {
-                        _state.value = _state.value.copy(installed = true, modelBytes = ModelManager.EXPECTED_BYTES, downloading = false, downloadProgress = 100)
+                        _state.value = _state.value.copy(installed = true, modelBytes = ModelManager.EXPECTED_BYTES, downloading = false, downloadProgress = 100, backgroundDownloadError = null)
                         if (processAfterDownload) {
                             processAfterDownload = false
                             _state.value.backgroundSource?.let { process(it) }
@@ -525,7 +528,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     WorkInfo.State.FAILED -> {
                         processAfterDownload = false
-                        _state.value = _state.value.copy(downloading = false, status = info.outputData.getString(ModelDownloadWorker.KEY_ERROR) ?: "Download failed")
+                        val error = info.outputData.getString(ModelDownloadWorker.KEY_ERROR) ?: "Download failed"
+                        _state.value = _state.value.copy(downloading = false, status = error, backgroundDownloadError = error)
                     }
                     WorkInfo.State.CANCELLED -> { processAfterDownload = false; _state.value = _state.value.copy(downloading = false) }
                     else -> _state.value = _state.value.copy(downloadProgress = ((done * 100 / total.coerceAtLeast(1)).toInt()).coerceIn(0, 99))
@@ -534,7 +538,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 delay(400)
             }
           } catch (e: Exception) {
-            _state.value = _state.value.copy(downloading = false, status = e.message ?: "Could not check download status")
+            val error = e.message ?: "Could not check download status"
+            _state.value = _state.value.copy(downloading = false, status = error, backgroundDownloadError = error)
           }
         }
     }
@@ -562,7 +567,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) { _state.value = _state.value.copy(upscalerDownloading = false, upscalerError = e.message ?: "Could not check download status", status = e.message ?: "Could not check download status") }
         }
     }
-    fun cancelDownload() { processAfterDownload = false; work.cancelUniqueWork("ormbg-model"); _state.value = _state.value.copy(downloading = false) }
+    fun cancelDownload() { processAfterDownload = false; work.cancelUniqueWork("ormbg-model"); _state.value = _state.value.copy(downloading = false, backgroundDownloadError = null) }
     fun cancelUpscalerDownload() { work.cancelUniqueWork("model:${ModelSpecs.imageUpscaler.id}"); _state.value = _state.value.copy(upscalerDownloading = false) }
 
     fun downloadSpeechModel() {
@@ -720,6 +725,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 _state.value = _state.value.copy(transcriptionBusy = false, transcriptionStage = null)
                 throw e
             } catch (e: Throwable) {
+                android.util.Log.e(
+                    "DappleSpeechToText",
+                    "Transcription failed",
+                    e,
+                )
                 val message = e.message.orEmpty()
                 _state.value = _state.value.copy(transcriptionBusy = false, transcriptionStage = null, transcriptionError = when {
                     isAudioLengthLimit(message) -> "This recording is longer than this tool can handle. Try a shorter recording (under five minutes)."
@@ -1146,7 +1156,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteModel() {
         val engine = remover
         remover = null
-        _state.value = _state.value.copy(installed = false, modelBytes = 0, settings = false, status = "Background Remover removed")
+        _state.value = _state.value.copy(installed = false, modelBytes = 0, settings = false, status = "Background Remover removed", backgroundDownloadError = null)
         viewModelScope.launch(Dispatchers.IO) { manager.delete(); runCatching { engine?.close() } }
     }
     fun deleteUpscalerModel() {

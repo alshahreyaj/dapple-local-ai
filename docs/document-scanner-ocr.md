@@ -12,7 +12,7 @@ The catalog entry is `document-scanner-ocr`. `ModelManager` downloads each artif
 | `rec.onnx` | [Latin PP-OCRv5 mobile recognizer ONNX](https://huggingface.co/PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx) | 8.04 MB | `7888113072263cb471b93f66dd5e2ad70548dc526fa1ace760d0d973dd121498` |
 | `latin_dict.txt` | [PaddleOCR PP-OCRv5 Latin dictionary](https://github.com/PaddlePaddle/PaddleOCR/blob/main/ppocr/utils/dict/ppocrv5_latin_dict.txt) | 2,616 bytes | `ccbcc45730b3fbbd9050c5bc74db6a99067141ef1035e3d14889a84a6b9b1aff` |
 
-The detector and recognizer are publisher ONNX exports, pinned to their Hugging Face revisions in `ModelSpecs.documentOcr`. The combined expected file size is 12,871,157 bytes (about 12.9 MB). All three artifacts and PaddleOCR are Apache-2.0 licensed. The Android deployment guide specifies ONNX Runtime 1.21.1 and OpenCV 4.5.3, which are used here. CameraX uses stable release 1.6.2.
+The detector and recognizer are publisher ONNX exports mirrored in Dapple's Hugging Face bucket; the catalog pins their download URLs and SHA-256 values. The combined expected file size is 12,871,157 bytes (about 12.9 MB). All three artifacts and PaddleOCR are Apache-2.0 licensed. The Android deployment guide specifies ONNX Runtime 1.21.1 and OpenCV 4.5.3, which are used here. CameraX uses stable release 1.6.2.
 
 ## Tensor and image contract
 

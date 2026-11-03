@@ -37,9 +37,9 @@ object ModelSpecs {
         verifySize = false,
         storageEstimateBytes = 13_500_000L,
         artifacts = listOf(
-            ModelArtifact("det.onnx", "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx/resolve/e6f4fa85f00e168c862bc462aebca69eef9b3d3d/inference.onnx", "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d", 4_826_518L),
-            ModelArtifact("rec.onnx", "https://huggingface.co/PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx/resolve/89d3a50e2c27e2e7cceeab0e944c25c807d5db4f/inference.onnx", "7888113072263cb471b93f66dd5e2ad70548dc526fa1ace760d0d973dd121498", 8_042_023L),
-            ModelArtifact("latin_dict.txt", "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/ppocr/utils/dict/ppocrv5_latin_dict.txt", "ccbcc45730b3fbbd9050c5bc74db6a99067141ef1035e3d14889a84a6b9b1aff", 2_616L),
+            ModelArtifact("det.onnx", "https://huggingface.co/buckets/xeneva-studio/localAI/resolve/document-ocr/det.onnx?download=true", "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d", 4_826_518L),
+            ModelArtifact("rec.onnx", "https://huggingface.co/buckets/xeneva-studio/localAI/resolve/document-ocr/rec.onnx?download=true", "7888113072263cb471b93f66dd5e2ad70548dc526fa1ace760d0d973dd121498", 8_042_023L),
+            ModelArtifact("latin_dict.txt", "https://huggingface.co/buckets/xeneva-studio/localAI/resolve/document-ocr/latin_dict.txt?download=true", "ccbcc45730b3fbbd9050c5bc74db6a99067141ef1035e3d14889a84a6b9b1aff", 2_616L),
         ),
     )
     val backgroundRemover = ModelSpec(

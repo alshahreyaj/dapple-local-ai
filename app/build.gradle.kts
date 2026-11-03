@@ -12,7 +12,7 @@ android {
         applicationId = "com.xenevastudio.dapple"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
+        versionCode = 11
         versionName = "1.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -20,7 +20,10 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
     compileOptions {
@@ -28,7 +31,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     androidResources { noCompress += "tflite" }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
         jniLibs.pickFirsts += "**/libc++_shared.so"
@@ -55,8 +61,11 @@ dependencies {
     implementation("androidx.camera:camera-camera2:$camerax")
     implementation("androidx.camera:camera-lifecycle:$camerax")
     implementation("androidx.camera:camera-view:$camerax")
-    // Match sherpa-onnx 1.13.8's bundled ONNX Runtime so both APIs share one ABI-compatible library.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.0")
+    // Keep sherpa-onnx and Microsoft ONNX Runtime on the same native API version.
+    // sherpa-onnx 1.13.4 uses ONNX Runtime 1.27.0; this AAR also supplies the JNI
+    // library required by Document Scanner & OCR's Java API.
+    implementation("com.github.k2-fsa:sherpa-onnx:v1.13.4")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.27.0")
     // Official OpenCV AAR. 4.5.3's native library was linked for 4 KB pages.
     implementation("org.opencv:opencv:4.12.0")
     // Overrides the older Fragment version pulled in through LiteRT's Play AI Delivery dependency.
@@ -70,7 +79,6 @@ dependencies {
     implementation("com.qualcomm.qti:qnn-litert-delegate:2.50.0")
     implementation("org.tensorflow:tensorflow-lite:2.17.0")
     implementation("com.github.wendykierp:JTransforms:3.2")
-    implementation("com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v1.13.8")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation(platform("androidx.compose:compose-bom:2026.04.01"))

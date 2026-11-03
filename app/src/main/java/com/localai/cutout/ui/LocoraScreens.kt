@@ -11,6 +11,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -72,6 +73,7 @@ import com.localai.cutout.catalog.ImplementationStatus
 import com.localai.cutout.catalog.PreviewStyle
 import com.localai.cutout.catalog.ToolCategory
 import com.localai.cutout.core.image.ImageExporter
+import com.localai.cutout.BuildConfig
 import com.localai.cutout.R
 
 @Composable
@@ -748,251 +750,110 @@ private fun InfoRow(label: String, value: String, last: Boolean = false) {
     }
 }
 
+private data class DownloadsModel(
+    val id: String,
+    val feature: AiFeature,
+    val description: String,
+    val sizeLabel: String,
+    val storedBytes: Long,
+    val installed: Boolean,
+    val downloading: Boolean,
+    val progress: Int,
+    val error: String?,
+    val show: Boolean,
+    val onOpen: () -> Unit,
+    val onDownload: () -> Unit,
+    val onCancel: () -> Unit,
+    val onDelete: () -> Unit,
+)
+
 @Composable
 fun DownloadsScreen(state: AppState, onOpen: () -> Unit, onDownload: () -> Unit, onCancel: () -> Unit, onDelete: () -> Unit, modifier: Modifier = Modifier, onOpenUpscaler: () -> Unit = onOpen, onDownloadUpscaler: () -> Unit = onDownload, onCancelUpscaler: () -> Unit = onCancel, onDeleteUpscaler: () -> Unit = onDelete, onOpenSpeech: () -> Unit = onOpen, onDownloadSpeech: () -> Unit = onDownload, onCancelSpeech: () -> Unit = onCancel, onDeleteSpeech: () -> Unit = onDelete, onOpenObject: () -> Unit = onOpen, onDownloadObject: () -> Unit = onDownload, onCancelObject: () -> Unit = onCancel, onDeleteObject: () -> Unit = onDelete, onOpenTranscription: () -> Unit = onOpen, onDownloadTranscription: () -> Unit = onDownload, onCancelTranscription: () -> Unit = onCancel, onDeleteTranscription: () -> Unit = onDelete, onOpenRestoration: () -> Unit = onOpen, onDownloadRestoration: () -> Unit = onDownload, onCancelRestoration: () -> Unit = onCancel, onDeleteRestoration: () -> Unit = onDelete, onOpenDocumentOcr: () -> Unit = onOpen, onDownloadDocumentOcr: () -> Unit = onDownload, onCancelDocumentOcr: () -> Unit = onCancel, onDeleteDocumentOcr: () -> Unit = onDelete) {
-    var confirmDelete by remember { mutableStateOf(false) }
+    val restorationReady = state.restorationScratchInstalled && state.restorationLamaInstalled && state.restorationColorizerInstalled && state.restorationEnhancerInstalled
+    val restorationPartial = state.restorationScratchInstalled || state.restorationLamaInstalled || state.restorationColorizerInstalled || state.restorationEnhancerInstalled
+    val models = listOf(
+        DownloadsModel("background-remover", FeatureCatalog.backgroundRemover, "Remove photo backgrounds", "176 MB download", state.modelBytes, state.installed, state.downloading, state.downloadProgress, state.backgroundDownloadError, state.installed || state.downloading || state.backgroundDownloadError != null, onOpen, onDownload, onCancel, onDelete),
+        DownloadsModel("image-upscaler", FeatureCatalog.all.first { it.id == "image-upscaler" }, "Enlarge photos and bring out detail", "17.5 MB download", state.upscalerBytes, state.upscalerInstalled, state.upscalerDownloading, state.upscalerProgress, state.upscalerError, state.upscalerInstalled || state.upscalerDownloading || state.upscalerError != null, onOpenUpscaler, onDownloadUpscaler, onCancelUpscaler, onDeleteUpscaler),
+        DownloadsModel("noise-remover", FeatureCatalog.all.first { it.id == "noise-remover" }, "Reduce background noise in recordings", "19.6 MB download", state.speechBytes, state.speechInstalled, state.speechDownloading, state.speechProgress, state.speechError, state.speechInstalled || state.speechDownloading || state.speechError != null, onOpenSpeech, onDownloadSpeech, onCancelSpeech, onDeleteSpeech),
+        DownloadsModel("speech-to-text", FeatureCatalog.all.first { it.id == "speech-to-text" }, "Turn recordings into text", "161 MB download", state.transcriptionBytes, state.transcriptionInstalled, state.transcriptionDownloading, state.transcriptionProgress, state.transcriptionError, state.transcriptionInstalled || state.transcriptionDownloading || state.transcriptionError != null, onOpenTranscription, onDownloadTranscription, onCancelTranscription, onDeleteTranscription),
+        DownloadsModel("object-remover", FeatureCatalog.all.first { it.id == "object-remover" }, "Remove unwanted objects from photos", "174 MB download", state.objectBytes, state.objectInstalled, state.objectDownloading, state.objectProgress, state.objectError, state.objectInstalled || state.objectDownloading || state.objectError != null, onOpenObject, onDownloadObject, onCancelObject, onDeleteObject),
+        DownloadsModel("document-scanner-ocr", FeatureCatalog.all.first { it.id == "document-scanner-ocr" }, "Scan pages and recognize text offline", "12.9 MB download", state.documentOcrBytes, state.documentOcrInstalled, state.documentOcrDownloading, state.documentOcrProgress, state.documentOcrError, state.documentOcrInstalled || state.documentOcrDownloading || state.documentOcrError != null, onOpenDocumentOcr, onDownloadDocumentOcr, onCancelDocumentOcr, onDeleteDocumentOcr),
+        DownloadsModel("photo-restoration", FeatureCatalog.all.first { it.id == "photo-restoration" }, "Repair scratches, add color, and improve detail", if (restorationPartial && !restorationReady) "${formatSize(state.restorationBytes)} stored · 488 MB total" else "488 MB download", state.restorationBytes, restorationReady, state.restorationDownloading, state.restorationProgress, state.restorationError, restorationPartial || state.restorationDownloading || state.restorationError != null, onOpenRestoration, onDownloadRestoration, onCancelRestoration, onDeleteRestoration),
+    ).filter { it.show }
+    val downloading = models.filter { it.downloading }
+    val installed = models.filter { it.installed && !it.downloading }
+    val attention = models.filter { !it.installed && !it.downloading }
+    var deleteTarget by remember { mutableStateOf<DownloadsModel?>(null) }
+
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item { LocoraWordmark() }
-        item { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("Your tools", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold); Text("See what's ready and free up space when you need to.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
-        if (state.downloading) item {
-            SectionTitle("IN PROGRESS", "Downloading")
-            ModelCard(state, onOpen, onDownload, onCancel) { confirmDelete = true }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("Your tools", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text("Manage downloads and the space they use on your phone.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (models.any { it.storedBytes > 0L }) Text("${installed.size} installed · ${formatSize(models.sumOf { it.storedBytes })} stored", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            }
         }
-        if (state.installed) item {
-            SectionTitle("INSTALLED", "Ready to use")
-            ModelCard(state, onOpen, onDownload, onCancel) { confirmDelete = true }
+        if (downloading.isNotEmpty()) {
+            item { SectionTitle("DOWNLOADING", "${downloading.size} active ${if (downloading.size == 1) "download" else "downloads"}") }
+            items(downloading.size, key = { "downloading-${downloading[it].id}" }) { index -> DownloadModelCard(downloading[index]) { deleteTarget = downloading[index] } }
         }
-        if (state.upscalerDownloading || state.upscalerInstalled || state.upscalerError != null) item {
-            SectionTitle(if (state.upscalerDownloading) "IN PROGRESS" else if (state.upscalerInstalled) "INSTALLED" else "AVAILABLE", if (state.upscalerDownloading) "Downloading" else if (state.upscalerInstalled) "Ready to use" else "Download didn't finish")
-            UpscalerModelCard(state, onOpenUpscaler, onDownloadUpscaler, onCancelUpscaler, onDeleteUpscaler)
+        if (installed.isNotEmpty()) {
+            item { SectionTitle("INSTALLED", "Ready to use") }
+            items(installed.size, key = { "installed-${installed[it].id}" }) { index -> DownloadModelCard(installed[index]) { deleteTarget = installed[index] } }
         }
-        if (state.speechDownloading || state.speechInstalled || state.speechError != null) item {
-            SectionTitle(if (state.speechDownloading) "IN PROGRESS" else if (state.speechInstalled) "INSTALLED" else "AVAILABLE", if (state.speechDownloading) "Downloading" else if (state.speechInstalled) "Ready to use" else "Download didn't finish")
-            SpeechModelCard(state, onOpenSpeech, onDownloadSpeech, onCancelSpeech, onDeleteSpeech)
+        if (attention.isNotEmpty()) {
+            item { SectionTitle("NEEDS ATTENTION", "Finish or retry setup") }
+            items(attention.size, key = { "attention-${attention[it].id}" }) { index -> DownloadModelCard(attention[index]) { deleteTarget = attention[index] } }
         }
-        if (state.transcriptionDownloading || state.transcriptionInstalled || state.transcriptionError != null) item {
-            SectionTitle(if (state.transcriptionDownloading) "IN PROGRESS" else if (state.transcriptionInstalled) "INSTALLED" else "AVAILABLE", if (state.transcriptionDownloading) "Downloading" else if (state.transcriptionInstalled) "Ready to use" else "Download didn't finish")
-            TranscriptionModelCard(state, onOpenTranscription, onDownloadTranscription, onCancelTranscription, onDeleteTranscription)
+        if (models.isEmpty()) item {
+            EmptyState("No downloads yet", "Choose a tool in Explore to download it. Once installed, you can use it offline.")
         }
-        if (state.objectDownloading || state.objectInstalled || state.objectError != null) item {
-            SectionTitle(if (state.objectDownloading) "IN PROGRESS" else if (state.objectInstalled) "INSTALLED" else "AVAILABLE", if (state.objectDownloading) "Downloading" else if (state.objectInstalled) "Ready to use" else "Download didn't finish")
-            ObjectModelCard(state, onOpenObject, onDownloadObject, onCancelObject, onDeleteObject)
-        }
-        if (state.documentOcrDownloading || state.documentOcrInstalled || state.documentOcrError != null) item {
-            SectionTitle(if (state.documentOcrDownloading) "IN PROGRESS" else if (state.documentOcrInstalled) "INSTALLED" else "AVAILABLE", if (state.documentOcrDownloading) "Downloading" else if (state.documentOcrInstalled) "Ready to use" else "Download didn't finish")
-            DocumentOcrModelCard(state, onOpenDocumentOcr, onDownloadDocumentOcr, onCancelDocumentOcr, onDeleteDocumentOcr)
-        }
-        if (state.restorationDownloading || state.restorationScratchInstalled || state.restorationLamaInstalled || state.restorationColorizerInstalled || state.restorationEnhancerInstalled || state.restorationError != null) item {
-            SectionTitle(if (state.restorationDownloading) "IN PROGRESS" else if (state.restorationScratchInstalled && state.restorationLamaInstalled && state.restorationColorizerInstalled && state.restorationEnhancerInstalled) "INSTALLED" else "AVAILABLE", if (state.restorationDownloading) "Downloading" else if (state.restorationScratchInstalled && state.restorationLamaInstalled && state.restorationColorizerInstalled && state.restorationEnhancerInstalled) "Ready to use" else "Download didn't finish")
-            RestorationModelCard(state, onOpenRestoration, onDownloadRestoration, onCancelRestoration, onDeleteRestoration)
-        }
-        if (!state.installed && !state.downloading && !state.upscalerInstalled && !state.upscalerDownloading && !state.speechInstalled && !state.speechDownloading && !state.transcriptionInstalled && !state.transcriptionDownloading && !state.objectInstalled && !state.objectDownloading && !state.documentOcrInstalled && !state.documentOcrDownloading && state.documentOcrError == null && state.objectError == null && state.transcriptionError == null && !state.restorationScratchInstalled && !state.restorationLamaInstalled && !state.restorationColorizerInstalled && !state.restorationEnhancerInstalled && !state.restorationDownloading && state.restorationError == null) item {
-            EmptyState("Your tools are ready to add", "Choose a tool in Explore to download it. After setup, you can use it without internet.")
-        }
-        if (state.status != null && !state.downloading) item { Text(state.status, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
     }
-    if (confirmDelete) AlertDialog(
-        onDismissRequest = { confirmDelete = false },
-        title = { Text("Remove this download?") },
-        text = { Text("You can download Background Remover again from Explore whenever you need it.") },
-        confirmButton = { TextButton(onClick = { confirmDelete = false; onDelete() }) { Text("Delete") } },
-        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Keep it") } },
-    )
+
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("Delete ${target.feature.title}?") },
+            text = { Text("This removes its downloaded files and frees up storage. You can download it again from Explore.") },
+            confirmButton = { TextButton(onClick = { deleteTarget = null; target.onDelete() }) { Text("Delete") } },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Keep download") } },
+        )
+    }
 }
 
 @Composable
-private fun RestorationModelCard(state: AppState, onOpen: () -> Unit, onDownload: () -> Unit, onCancel: () -> Unit, onDelete: () -> Unit) {
+private fun DownloadModelCard(model: DownloadsModel, onDelete: () -> Unit) {
     Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-                FeaturePreview(FeatureCatalog.all.first { it.id == "photo-restoration" }, Modifier.size(72.dp).clip(RoundedCornerShape(16.dp)))
+                FeaturePreview(model.feature, Modifier.size(72.dp).clip(RoundedCornerShape(16.dp)))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Photo Restoration", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("Scratch repair · colorization · 4× detail", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(if (state.restorationScratchInstalled && state.restorationLamaInstalled && state.restorationColorizerInstalled && state.restorationEnhancerInstalled) "${formatSize(state.restorationBytes)} Photo Restoration models" else "About 488 MB total", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    Text(model.feature.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(model.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (model.installed) "${formatSize(model.storedBytes)} stored" else model.sizeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                 }
-            }
-            if (state.restorationDownloading) {
-                LinearProgressIndicator({ state.restorationProgress / 100f }, Modifier.fillMaxWidth())
-                OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel download") }
-            } else if (state.restorationScratchInstalled && state.restorationLamaInstalled && state.restorationColorizerInstalled && state.restorationEnhancerInstalled) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = onOpen, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Text("Open tool") }
-                    OutlinedButton(onClick = onDelete, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(6.dp)); Text("Delete") }
-                }
-            } else {
-                state.restorationError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-                Button(onClick = onDownload, modifier = Modifier.fillMaxWidth()) { Text("Download models") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SpeechModelCard(state: AppState, onOpen: () -> Unit, onDownload: () -> Unit, onCancel: () -> Unit, onDelete: () -> Unit) {
-    Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-                FeaturePreview(FeatureCatalog.all.first { it.id == "noise-remover" }, Modifier.size(72.dp).clip(RoundedCornerShape(16.dp)))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Speech Noise Remover", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(if (state.speechInstalled) "Ready to use without internet" else "Noise reduction for recordings", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(if (state.speechInstalled) formatSize(state.speechBytes) else if (state.speechDownloading) "${state.speechProgress}% downloaded" else "About 19.6 MB download", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                }
-                if (state.speechInstalled) Icon(Icons.Rounded.CheckCircle, "Ready to use", tint = MaterialTheme.colorScheme.primary)
-            }
-            if (state.speechDownloading) {
-                LinearProgressIndicator(progress = { state.speechProgress / 100f }, Modifier.fillMaxWidth())
-                OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel download") }
-            } else if (state.speechInstalled) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = onOpen, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Text("Open tool") }
-                    OutlinedButton(onClick = onDelete, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(6.dp)); Text("Delete") }
-                }
-            } else {
-                if (state.speechError != null) Text(state.speechError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                Button(onClick = onDownload, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp)) { Text("Try again") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TranscriptionModelCard(state: AppState, onOpen: () -> Unit, onDownload: () -> Unit, onCancel: () -> Unit, onDelete: () -> Unit) {
-    Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-                FeaturePreview(FeatureCatalog.all.first { it.id == "speech-to-text" }, Modifier.size(72.dp).clip(RoundedCornerShape(16.dp)))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Speech-to-Text", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(if (state.transcriptionInstalled) "Ready to use without internet" else "English and German transcription", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(if (state.transcriptionInstalled) formatSize(state.transcriptionBytes) else if (state.transcriptionDownloading) "${state.transcriptionProgress}% downloaded" else "About 161 MB download", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                }
-                if (state.transcriptionInstalled) Icon(Icons.Rounded.CheckCircle, "Ready to use", tint = MaterialTheme.colorScheme.primary)
-            }
-            if (state.transcriptionDownloading) {
-                LinearProgressIndicator(progress = { state.transcriptionProgress / 100f }, Modifier.fillMaxWidth())
-                OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel download") }
-            } else if (state.transcriptionInstalled) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = onOpen, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Text("Open tool") }
-                    OutlinedButton(onClick = onDelete, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(6.dp)); Text("Delete") }
-                }
-            } else {
-                if (state.transcriptionError != null) Text(state.transcriptionError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                Button(onClick = onDownload, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp)) { Text("Try again") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ObjectModelCard(state: AppState, onOpen: () -> Unit, onDownload: () -> Unit, onCancel: () -> Unit, onDelete: () -> Unit) {
-    Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-                FeaturePreview(FeatureCatalog.all.first { it.id == "object-remover" }, Modifier.size(72.dp).clip(RoundedCornerShape(16.dp)))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Object Remover", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(if (state.objectInstalled) "Ready to use without internet" else "Remove objects from photos", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(if (state.objectInstalled) formatSize(state.objectBytes) else if (state.objectDownloading) { if (state.objectProgress >= 0) "${state.objectProgress}% downloaded" else "Downloading…" } else "174 MB download", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                }
-                if (state.objectInstalled) Icon(Icons.Rounded.CheckCircle, "Ready to use", tint = MaterialTheme.colorScheme.primary)
-            }
-            if (state.objectDownloading) {
-                if (state.objectProgress >= 0) LinearProgressIndicator(progress = { state.objectProgress / 100f }, Modifier.fillMaxWidth()) else LinearProgressIndicator(Modifier.fillMaxWidth())
-                OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel download") }
-            } else if (state.objectInstalled) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = onOpen, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Text("Open tool") }
-                    OutlinedButton(onClick = onDelete, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(6.dp)); Text("Delete") }
-                }
-            } else {
-                if (state.objectError != null) Text(state.objectError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                Button(onClick = onDownload, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp)) { Text("Try again") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DocumentOcrModelCard(state: AppState, onOpen: () -> Unit, onDownload: () -> Unit, onCancel: () -> Unit, onDelete: () -> Unit) {
-    Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-                FeaturePreview(FeatureCatalog.all.first { it.id == "document-scanner-ocr" }, Modifier.size(72.dp).clip(RoundedCornerShape(16.dp)))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Document Scanner & OCR", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("English and German · works offline", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(if (state.documentOcrInstalled) formatSize(state.documentOcrBytes) else if (state.documentOcrDownloading) "${state.documentOcrProgress}% downloaded" else "12.9 MB download", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                }
-                if (state.documentOcrInstalled) Icon(Icons.Rounded.CheckCircle, "Ready to use", tint = MaterialTheme.colorScheme.primary)
+                if (model.installed) Icon(Icons.Rounded.CheckCircle, "Installed", tint = MaterialTheme.colorScheme.primary)
             }
             when {
-                state.documentOcrDownloading -> { LinearProgressIndicator(progress = { state.documentOcrProgress / 100f }, modifier = Modifier.fillMaxWidth()); OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel download") } }
-                state.documentOcrInstalled -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = onOpen, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Text("Open tool") }
+                model.downloading -> {
+                    if (model.progress in 0..100) {
+                        LinearProgressIndicator(progress = { model.progress / 100f }, modifier = Modifier.fillMaxWidth())
+                        Text("${model.progress}% downloaded", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text("Downloading…", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    OutlinedButton(onClick = model.onCancel, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp)) { Text("Cancel download") }
+                }
+                model.installed -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = model.onOpen, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Text("Open tool") }
                     OutlinedButton(onClick = onDelete, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(6.dp)); Text("Delete") }
                 }
-                else -> { state.documentOcrError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }; Button(onClick = onDownload, modifier = Modifier.fillMaxWidth()) { Text("Try again") } }
-            }
-        }
-    }
-}
-
-@Composable
-private fun UpscalerModelCard(state: AppState, onOpen: () -> Unit, onDownload: () -> Unit, onCancel: () -> Unit, onDelete: () -> Unit) {
-    Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-                FeaturePreview(FeatureCatalog.all.first { it.id == "image-upscaler" }, Modifier.size(72.dp).clip(RoundedCornerShape(16.dp)))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Photo Enhancer", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(if (state.upscalerInstalled) "Ready to use without internet" else "Makes photos four times larger", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(if (state.upscalerInstalled) formatSize(state.upscalerBytes) else if (state.upscalerDownloading) "${state.upscalerProgress}% downloaded" else "About 17.5 MB download", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                }
-                if (state.upscalerInstalled) Icon(Icons.Rounded.CheckCircle, "Ready to use", tint = MaterialTheme.colorScheme.primary)
-            }
-            if (state.upscalerDownloading) {
-                LinearProgressIndicator(progress = { state.upscalerProgress / 100f }, Modifier.fillMaxWidth())
-                OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel download") }
-            } else if (state.upscalerInstalled) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = onOpen, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Text("Open tool") }
-                    OutlinedButton(onClick = onDelete, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(6.dp)); Text("Delete") }
-                }
-            } else {
-                if (state.upscalerError != null) Text(state.upscalerError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                Button(onClick = onDownload, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp)) { Text(if (state.upscalerError != null) "Try again" else "Download tool") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ModelCard(state: AppState, onOpen: () -> Unit, onDownload: () -> Unit, onCancel: () -> Unit, onDelete: () -> Unit) {
-    Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-                FeaturePreview(FeatureCatalog.backgroundRemover, Modifier.size(72.dp).clip(RoundedCornerShape(16.dp)))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Background Remover", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(if (state.installed) "Ready to use without internet" else "Getting ready · About 176 MB", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(if (state.installed) formatSize(state.modelBytes) else "${state.downloadProgress}% downloaded", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                }
-                if (state.installed) Icon(Icons.Rounded.CheckCircle, "Ready to use", tint = MaterialTheme.colorScheme.primary)
-            }
-            if (state.downloading) {
-                LinearProgressIndicator(progress = { state.downloadProgress / 100f }, Modifier.fillMaxWidth())
-                OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel download") }
-            } else if (state.installed) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = onOpen, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Text("Open tool") }
-                    OutlinedButton(onClick = onDelete, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(6.dp)); Text("Delete") }
-                }
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = onDownload, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Text(if (state.status != null) "Try again" else "Download tool") }
+                else -> {
+                    model.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                    if (model.storedBytes > 0L) OutlinedButton(onClick = onDelete, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp)) { Text("Remove downloaded files") }
+                    Button(onClick = model.onDownload, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp)) { Text(if (model.error != null) "Try again" else "Continue download") }
                 }
             }
         }
@@ -1051,51 +912,51 @@ fun LocoraSettingsScreen(state: AppState, onTheme: (String) -> Unit, onDelete: (
             }
         }
         item { SectionTitle("ABOUT", "Dapple") }
-        item { Text("Version 1.1 · Creative AI, made personal", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Text("Version ${BuildConfig.VERSION_NAME} · Creative AI, made personal", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item { TextButton(onClick = onLicenses) { Text("Model licenses and notices") } }
     }
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false }, title = { Text("Remove Background Remover?") },
-        text = { Text("You can download it again from Explore whenever you need it.") },
+        text = { Text("This removes the downloaded model files. You can download it again from Explore whenever you need it.") },
         confirmButton = { TextButton(onClick = { confirmDelete = false; onDelete() }) { Text("Remove") } },
-        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Keep it") } },
+        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Keep") } },
     )
     if (confirmDeleteUpscaler) AlertDialog(
         onDismissRequest = { confirmDeleteUpscaler = false }, title = { Text("Remove Photo Enhancer?") },
-        text = { Text("You can download it again from Explore whenever you need it.") },
+        text = { Text("This removes the downloaded model files. You can download it again from Explore whenever you need it.") },
         confirmButton = { TextButton(onClick = { confirmDeleteUpscaler = false; onDeleteUpscaler() }) { Text("Remove") } },
-        dismissButton = { TextButton(onClick = { confirmDeleteUpscaler = false }) { Text("Keep it") } },
+        dismissButton = { TextButton(onClick = { confirmDeleteUpscaler = false }) { Text("Keep") } },
     )
     if (confirmDeleteSpeech) AlertDialog(
         onDismissRequest = { confirmDeleteSpeech = false }, title = { Text("Remove Speech Noise Remover?") },
-        text = { Text("You can download it again from Explore whenever you need it.") },
+        text = { Text("This removes the downloaded model files. You can download it again from Explore whenever you need it.") },
         confirmButton = { TextButton(onClick = { confirmDeleteSpeech = false; onDeleteSpeech() }) { Text("Remove") } },
-        dismissButton = { TextButton(onClick = { confirmDeleteSpeech = false }) { Text("Keep it") } },
+        dismissButton = { TextButton(onClick = { confirmDeleteSpeech = false }) { Text("Keep") } },
     )
     if (confirmDeleteTranscription) AlertDialog(
         onDismissRequest = { confirmDeleteTranscription = false },
-        title = { Text("Remove Speech-to-Text model?") },
-        text = { Text("You can download it again from Explore. Your saved transcripts won't be deleted.") },
+        title = { Text("Remove Speech-to-Text?") },
+        text = { Text("This removes the downloaded model files. Your saved transcripts won't be deleted, and you can download the model again from Explore.") },
         confirmButton = { TextButton(onClick = { confirmDeleteTranscription = false; onDeleteTranscription() }) { Text("Remove") } },
-        dismissButton = { TextButton(onClick = { confirmDeleteTranscription = false }) { Text("Keep model") } },
+        dismissButton = { TextButton(onClick = { confirmDeleteTranscription = false }) { Text("Keep") } },
     )
     if (confirmDeleteObject) AlertDialog(
         onDismissRequest = { confirmDeleteObject = false }, title = { Text("Remove Object Remover?") },
-        text = { Text("You can download it again from Explore whenever you need it.") },
+        text = { Text("This removes the downloaded model files. You can download it again from Explore whenever you need it.") },
         confirmButton = { TextButton(onClick = { confirmDeleteObject = false; onDeleteObject() }) { Text("Remove") } },
-        dismissButton = { TextButton(onClick = { confirmDeleteObject = false }) { Text("Keep it") } },
+        dismissButton = { TextButton(onClick = { confirmDeleteObject = false }) { Text("Keep") } },
     )
     if (confirmDeleteRestoration) AlertDialog(
-        onDismissRequest = { confirmDeleteRestoration = false }, title = { Text("Remove Photo Restoration models?") },
-        text = { Text("This removes the scratch repair, colorization and detail enhancement models. You can download Photo Restoration again from Explore.") },
+        onDismissRequest = { confirmDeleteRestoration = false }, title = { Text("Remove Photo Restoration?") },
+        text = { Text("This removes the downloaded model files. You can download them again from Explore whenever you need them.") },
         confirmButton = { TextButton(onClick = { confirmDeleteRestoration = false; onDeleteRestoration() }) { Text("Remove") } },
-        dismissButton = { TextButton(onClick = { confirmDeleteRestoration = false }) { Text("Keep models") } },
+        dismissButton = { TextButton(onClick = { confirmDeleteRestoration = false }) { Text("Keep") } },
     )
     if (confirmDeleteDocumentOcr) AlertDialog(
-        onDismissRequest = { confirmDeleteDocumentOcr = false }, title = { Text("Remove Document Scanner model?") },
-        text = { Text("You can download it again from Explore. Your saved scans and text won't be deleted.") },
+        onDismissRequest = { confirmDeleteDocumentOcr = false }, title = { Text("Remove Document Scanner & OCR?") },
+        text = { Text("This removes the downloaded model files. Your saved scans and text won't be deleted, and you can download the models again from Explore.") },
         confirmButton = { TextButton(onClick = { confirmDeleteDocumentOcr = false; onDeleteDocumentOcr() }) { Text("Remove") } },
-        dismissButton = { TextButton(onClick = { confirmDeleteDocumentOcr = false }) { Text("Keep model") } },
+        dismissButton = { TextButton(onClick = { confirmDeleteDocumentOcr = false }) { Text("Keep") } },
     )
 }
 
